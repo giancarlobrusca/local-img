@@ -306,6 +306,98 @@ def test_cuda_perf_factors():
     check("unrecognized", hardware.cuda_perf_factor("NVIDIA A100-SXM4") == 3.0)
 
 
+# ---------------------------------------------------------------- estimate ---
+
+def test_estimate_scales_with_perf_factor_and_steps():
+    import hardware
+    from models import BY_KEY
+
+    spec = BY_KEY["dreamshaper-xl-turbo"]      # baseline 40 s at 7 steps
+    reference = hardware.estimate(_profile(perf=1.0), spec)
+    check("reference machine reproduces the baseline", reference.seconds == 40.0)
+    check("reference machine label", reference.label == "~40 s (estimated)")
+    check("reference machine source", reference.source == "scaled")
+
+    faster = hardware.estimate(_profile(perf=2.5), spec)
+    check("2.5x machine is 2.5x faster", faster.seconds == 16.0)
+    check("2.5x machine label", faster.label == "~16 s (estimated)")
+
+    doubled = hardware.estimate(_profile(perf=2.0), spec, steps=14)
+    check("double the steps, double the time", doubled.seconds == 40.0)
+
+
+def test_estimate_switches_to_history_at_three_samples():
+    import hardware
+    from models import BY_KEY
+
+    spec = BY_KEY["dreamshaper-xl-turbo"]
+    prof = _profile(perf=1.0)
+
+    two = hardware.estimate(prof, spec, history=[10.0, 12.0])
+    check("two samples are not enough", two.source == "scaled")
+    check("two samples keep the estimated label", two.label == "~40 s (estimated)")
+
+    three = hardware.estimate(prof, spec, history=[10.0, 12.0, 50.0])
+    check("three samples switch to history", three.source == "history")
+    check("history uses the median, not the mean", three.seconds == 12.0)
+    check("history label", three.label == "~12 s (your average)")
+
+
+def test_estimate_without_a_profile_uses_the_reference_machine():
+    import hardware
+    from models import BY_KEY
+
+    spec = BY_KEY["dreamshaper-xl-turbo"]
+    for label, prof in (("no profile", None), ("skipped", _profile(skipped=True))):
+        est = hardware.estimate(prof, spec)
+        check(f"{label}: unscaled baseline", est.seconds == 40.0)
+        check(f"{label}: reference label", est.label == "~40 s (reference machine)")
+        check(f"{label}: reference source", est.source == "reference")
+
+    # A measurement of the user's own machine outranks the fallback, even when
+    # they declined the scan — three real timings are better evidence than none.
+    est = hardware.estimate(_profile(skipped=True), spec, history=[9.0, 11.0, 13.0])
+    check("history outranks a skipped profile", est.source == "history")
+    check("history label after skipping", est.label == "~11 s (your average)")
+
+
+def test_read_history_groups_by_model():
+    import hardware
+
+    out = ROOT / f"{PREFIX}outputs"
+    out.mkdir(exist_ok=True)
+    samples = [
+        ("a", {"model": "dreamshaper-8", "seconds": 18.0, "steps": 25}),
+        ("b", {"model": "dreamshaper-8", "seconds": 20.0, "steps": 25}),
+        ("c", {"model": "sdxl-turbo", "seconds": 5.5, "steps": 3}),
+        ("d", {"model": "sdxl-turbo"}),            # no seconds — ignored
+        ("e", {"seconds": 3.0}),                   # no model — ignored
+    ]
+    written = []
+    for stem, meta in samples:
+        path = out / f"{PREFIX}{stem}.json"
+        path.write_text(json.dumps(meta))
+        written.append(path)
+    (out / f"{PREFIX}bad.json").write_text("{not json")
+    written.append(out / f"{PREFIX}bad.json")
+
+    try:
+        hist = hardware.read_history(out)
+        check("groups by model key", sorted(hist) == ["dreamshaper-8", "sdxl-turbo"])
+        check("collects every timing", sorted(hist["dreamshaper-8"]) == [18.0, 20.0])
+        check("skips records with no seconds", hist["sdxl-turbo"] == [5.5])
+    finally:
+        for path in written:
+            path.unlink(missing_ok=True)
+        out.rmdir()
+
+
+def test_read_history_on_a_missing_directory():
+    import hardware
+    check("a missing outputs dir is an empty history",
+          hardware.read_history(ROOT / f"{PREFIX}absent-dir") == {})
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]

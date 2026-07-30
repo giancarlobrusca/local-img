@@ -16,6 +16,7 @@ import json
 import os
 import platform as platform_mod
 import shutil
+import statistics
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -393,3 +394,65 @@ def skipped_profile(device: str) -> HardwareProfile:
         skipped=True,
         detected_at=_now(),
     )
+
+
+# ---------------------------------------------------------------- estimate ---
+
+# Below this many recorded renders the median is too noisy to trust.
+HISTORY_MIN = 3
+
+
+@dataclass
+class Estimate:
+    seconds: float
+    label: str     # "~40 s (estimated)" | "~12 s (your average)" | "~40 s (reference machine)"
+    source: str    # history | scaled | reference
+
+
+def estimate(profile: HardwareProfile | None, spec, history=(), steps=None) -> Estimate:
+    """Seconds per image, with the best evidence available.
+
+    Three sources, strongest first:
+      history   — the median of this machine's own recorded renders. Needs
+                  HISTORY_MIN samples, and ignores `steps`: it reports what
+                  actually happened, not a model of it.
+      scaled    — baseline / perf_factor, adjusted for the step count.
+      reference — the baseline itself, when nothing about this machine is known.
+    """
+    steps = steps or spec.steps
+    history = list(history)
+
+    if len(history) >= HISTORY_MIN:
+        seconds = float(statistics.median(history))
+        return Estimate(round(seconds, 1), f"~{seconds:.0f} s (your average)", "history")
+
+    ratio = steps / spec.steps if spec.steps else 1.0
+    if profile is None or profile.skipped:
+        seconds = spec.baseline_seconds * ratio
+        return Estimate(round(seconds, 1), f"~{seconds:.0f} s (reference machine)", "reference")
+
+    factor = profile.perf_factor or 1.0
+    seconds = spec.baseline_seconds / factor * ratio
+    return Estimate(round(seconds, 1), f"~{seconds:.0f} s (estimated)", "scaled")
+
+
+def read_history(outputs_dir) -> dict[str, list[float]]:
+    """Recorded seconds per model, read from the render sidecars.
+
+    Every generation already writes `model`, `steps` and `seconds` into a JSON
+    sidecar next to its PNG. That makes the estimate self-correcting on any
+    machine with no benchmark step and no extra bookkeeping.
+    """
+    outputs_dir = Path(outputs_dir)
+    history: dict[str, list[float]] = {}
+    if not outputs_dir.is_dir():
+        return history
+    for path in outputs_dir.glob("*.json"):
+        try:
+            meta = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        key, seconds = meta.get("model"), meta.get("seconds")
+        if isinstance(key, str) and isinstance(seconds, (int, float)):
+            history.setdefault(key, []).append(float(seconds))
+    return history
