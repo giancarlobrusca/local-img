@@ -13,6 +13,11 @@ decimal GB (bytes / 1e9), matching download_gb.
 from __future__ import annotations
 
 import json
+import os
+import platform as platform_mod
+import shutil
+import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -165,3 +170,226 @@ def load(path=None) -> HardwareProfile | None:
         return HardwareProfile(**data)
     except TypeError:
         return None
+
+
+# ------------------------------------------------------------------ detect ---
+
+def _gib(num_bytes: float) -> float:
+    return num_bytes / (2 ** 30)
+
+
+def _gb(num_bytes: float) -> float:
+    return num_bytes / 1e9
+
+
+def _try(fn, default, flags: list):
+    """Run a probe. On any failure return `default` and record it as partial."""
+    try:
+        value = fn()
+    except Exception:
+        flags.append("x")
+        return default
+    if value is None:
+        flags.append("x")
+        return default
+    return value
+
+
+def _sysctl(name: str) -> str:
+    out = subprocess.run(
+        ["sysctl", "-n", name], capture_output=True, text=True, timeout=5, check=True
+    )
+    return out.stdout.strip()
+
+
+def _gpu_cores() -> int | None:
+    """Apple Silicon GPU core count, via system_profiler.
+
+    Invoked with a 5 s timeout. If it is missing, slow, or returns unexpected
+    JSON, the caller records `partial` and perf_factor falls back to the device
+    default — the app never fails to start because of detection.
+    """
+    out = subprocess.run(
+        ["system_profiler", "SPDisplaysDataType", "-json"],
+        capture_output=True, text=True, timeout=5, check=True,
+    )
+    cards = json.loads(out.stdout).get("SPDisplaysDataType") or []
+    for card in cards:
+        cores = card.get("sppci_cores")
+        if cores:
+            return int(cores)
+    return None
+
+
+def _total_ram_gib(system: str) -> float:
+    if system == "Darwin":
+        return _gib(int(_sysctl("hw.memsize")))
+    if system == "Windows":
+        import ctypes
+
+        class MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(MemoryStatusEx)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+        return _gib(status.ullTotalPhys)
+    return _gib(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
+
+
+def _chip(system: str, device: str) -> str:
+    if system == "Darwin":
+        return _sysctl("machdep.cpu.brand_string")
+    if device == "cuda":
+        import torch
+
+        return torch.cuda.get_device_name(0)
+    return platform_mod.processor() or platform_mod.machine()
+
+
+def _budget_gib(device: str, total_ram_gb: float) -> float:
+    """Memory actually available for weights plus activations.
+
+    Measured, not guessed. Metal's own answer on MPS; 90% of the card on CUDA;
+    a fraction of system RAM on CPU, where the model also costs twice as much
+    because app.py selects fp32 there.
+    """
+    import torch
+
+    if device == "mps":
+        return _gib(torch.mps.recommended_max_memory())
+    if device == "cuda":
+        return _gib(torch.cuda.get_device_properties(0).total_memory) * 0.9
+    return total_ram_gb * CPU_BUDGET_FRACTION
+
+
+def cuda_perf_factor(name: str) -> float:
+    """Coarse by construction — this project has no NVIDIA hardware to calibrate
+    against. These produce an order-of-magnitude first-run number that the UI
+    always labels an estimate; recorded history replaces it after three renders.
+    """
+    lowered = name.lower()
+    if any(tag in lowered for tag in ("4090", "5090")):
+        return 6.0
+    if any(tag in lowered for tag in ("4080", "5080", "3090")):
+        return 4.0
+    if any(tag in lowered for tag in ("3060", "4060", "5060", "3070", "4070")):
+        return 2.0
+    return 3.0
+
+
+def _perf_factor(device: str, gpu_cores: int | None, chip: str) -> float:
+    if device == "cpu":
+        return CPU_PERF_FACTOR
+    if device == "cuda":
+        return cuda_perf_factor(chip)
+    if gpu_cores:
+        return gpu_cores / REFERENCE_GPU_CORES
+    return 1.0
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def detect(device: str, specs=None) -> HardwareProfile:
+    """Measure the machine. Never raises — a total failure returns a
+    conservative profile with partial=True so the app always starts.
+
+    `device` comes from app._pick_device(); passing it in rather than computing
+    it here is what keeps this module free of an import cycle.
+    """
+    if specs is None:
+        from models import MODELS as specs
+
+    try:
+        flags: list = []
+        system = platform_mod.system()
+
+        chip = _try(lambda: _chip(system, device), "unknown", flags)
+        gpu_cores = None
+        if system == "Darwin" and device == "mps":
+            gpu_cores = _try(_gpu_cores, None, flags)
+        total_ram_gb = _try(lambda: _total_ram_gib(system), 8.0, flags)
+        budget_gb = _try(
+            lambda: _budget_gib(device, total_ram_gb),
+            total_ram_gb * CPU_BUDGET_FRACTION,
+            flags,
+        )
+        free_disk_gb = _try(lambda: _gb(shutil.disk_usage(ROOT).free), 0.0, flags)
+
+        profile = HardwareProfile(
+            schema_version=SCHEMA_VERSION,
+            device=device,
+            platform=f"{system.lower()}-{platform_mod.machine()}",
+            chip=chip,
+            gpu_cores=gpu_cores,
+            total_ram_gb=round(total_ram_gb, 2),
+            budget_gb=round(budget_gb, 2),
+            free_disk_gb=round(free_disk_gb, 1),
+            tier="",                # filled in below, from the fit results
+            perf_factor=round(_perf_factor(device, gpu_cores, chip), 3),
+            partial=bool(flags),
+            skipped=False,
+            detected_at=_now(),
+        )
+        profile.tier = derive_tier(profile, specs)
+        return profile
+    except Exception:
+        return _conservative(device)
+
+
+def _conservative(device: str) -> HardwareProfile:
+    """What detection returns when it fails outright. Fit rules still apply
+    against these numbers — they are pessimistic, not absent.
+    """
+    total_ram_gb = 8.0
+    try:
+        total_ram_gb = _total_ram_gib(platform_mod.system())
+    except Exception:
+        pass
+    return HardwareProfile(
+        schema_version=SCHEMA_VERSION,
+        device=device,
+        platform=f"{platform_mod.system().lower()}-{platform_mod.machine()}",
+        chip="unknown",
+        gpu_cores=None,
+        total_ram_gb=round(total_ram_gb, 2),
+        budget_gb=round(total_ram_gb * CPU_BUDGET_FRACTION, 2),
+        free_disk_gb=0.0,
+        tier="cpu" if device == "cpu" else "low",
+        perf_factor=CPU_PERF_FACTOR if device == "cpu" else 1.0,
+        partial=True,
+        skipped=False,
+        detected_at=_now(),
+    )
+
+
+def skipped_profile(device: str) -> HardwareProfile:
+    """A persisted record of a declined analysis, not a measurement.
+
+    Every model reports fits=True with an empty reason, nothing is recommended,
+    max_batch is 4, and estimates fall back to the reference machine. The banner
+    offering the analysis stays until a real scan replaces this.
+    """
+    return HardwareProfile(
+        schema_version=SCHEMA_VERSION,
+        device=device,
+        platform=f"{platform_mod.system().lower()}-{platform_mod.machine()}",
+        chip="",
+        gpu_cores=None,
+        total_ram_gb=0.0,
+        budget_gb=0.0,
+        free_disk_gb=0.0,
+        tier="unknown",
+        perf_factor=1.0,
+        partial=False,
+        skipped=True,
+        detected_at=_now(),
+    )

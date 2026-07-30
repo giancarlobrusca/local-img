@@ -220,6 +220,72 @@ def test_profile_dir_is_gitignored():
     check(".local-img/ is gitignored", ".local-img/" in ignore)
 
 
+# ------------------------------------------------------------------ detect ---
+
+def test_detect_on_this_machine():
+    import hardware
+    import app as app_module
+
+    prof = hardware.detect(app_module.DEVICE)
+    check("schema_version is stamped", prof.schema_version == hardware.SCHEMA_VERSION)
+    check("device matches app", prof.device == app_module.DEVICE)
+    check("budget_gb is positive", prof.budget_gb > 0)
+    check("total_ram_gb is positive", prof.total_ram_gb > 0)
+    check("free_disk_gb is positive", prof.free_disk_gb > 0)
+    check("perf_factor is positive", prof.perf_factor > 0)
+    check("tier is known", prof.tier in ("cpu", "low", "mid", "high", "ultra"))
+    check("not skipped", prof.skipped is False)
+    check("detected_at looks like ISO 8601", prof.detected_at[:4].isdigit())
+    check("chip is non-empty", bool(prof.chip))
+    print(f"       this machine: {prof.chip} · {prof.gpu_cores} cores · "
+          f"{prof.total_ram_gb:.0f} GB · {prof.budget_gb:.1f} GB usable · {prof.tier}")
+
+
+def test_detect_survives_broken_system_calls():
+    import hardware
+
+    def boom(*_args, **_kwargs):
+        raise OSError("no such binary")
+
+
+    real_run = hardware.subprocess.run
+    try:
+        hardware.subprocess.run = boom
+        prof = hardware.detect("cpu")
+    finally:
+        hardware.subprocess.run = real_run
+
+    check("detection did not propagate the failure", isinstance(prof, hardware.HardwareProfile))
+    check("the profile is flagged partial", prof.partial is True)
+    check("budget_gb is still positive", prof.budget_gb > 0)
+    check("tier is still known", prof.tier in ("cpu", "low", "mid", "high", "ultra"))
+    check("subprocess.run was restored", hardware.subprocess.run is real_run)
+
+
+def test_skipped_profile():
+    import hardware
+    from models import MODELS
+
+    prof = hardware.skipped_profile("mps")
+    check("skipped is recorded", prof.skipped is True)
+    check("skipped is not partial", prof.partial is False)
+    check("skipped carries the device", prof.device == "mps")
+    check("skipped has no tier claim", prof.tier == "unknown")
+    fits = hardware.fit_all(prof, MODELS)
+    check("skipped: everything fits", all(f.fits for f in fits.values()))
+    check("skipped: nothing recommended", not any(f.recommended for f in fits.values()))
+
+
+def test_cuda_perf_factors():
+    import hardware
+    check("4090 class", hardware.cuda_perf_factor("NVIDIA GeForce RTX 4090") == 6.0)
+    check("5090 class", hardware.cuda_perf_factor("NVIDIA GeForce RTX 5090") == 6.0)
+    check("3090 class", hardware.cuda_perf_factor("NVIDIA GeForce RTX 3090 Ti") == 4.0)
+    check("4080 class", hardware.cuda_perf_factor("NVIDIA GeForce RTX 4080") == 4.0)
+    check("4060 class", hardware.cuda_perf_factor("NVIDIA GeForce RTX 4060") == 2.0)
+    check("unrecognized", hardware.cuda_perf_factor("NVIDIA A100-SXM4") == 3.0)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
