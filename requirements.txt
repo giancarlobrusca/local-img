@@ -1,0 +1,13 @@
+torch>=2.4
+torchvision
+diffusers>=0.31
+transformers>=4.44
+accelerate
+safetensors
+sentencepiece
+protobuf
+peft
+huggingface_hub[hf_transfer]
+fastapi
+uvicorn[standard]
+pillow

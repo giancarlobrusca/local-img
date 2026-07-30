@@ -1,0 +1,332 @@
+"""Local text-to-image server. Runs on Apple Metal (MPS), NVIDIA (CUDA), or CPU.
+
+Runs entirely offline after the model weights are cached. Start with ./run.sh
+then open http://127.0.0.1:7788
+
+Bound to localhost on purpose. This serves an unauthenticated, unfiltered
+generation endpoint with a shared gallery and a delete route — it is a
+single-user tool, not something to expose to a network.
+"""
+
+from __future__ import annotations
+
+import gc
+import json
+import os
+import queue
+import random
+import threading
+import time
+from pathlib import Path
+
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+import torch
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from models import BY_KEY, DEFAULT_MODEL, MODELS
+
+ROOT = Path(__file__).parent
+OUTPUTS = ROOT / "outputs"
+OUTPUTS.mkdir(exist_ok=True)
+
+def _pick_device() -> str:
+    """CUDA, then Apple Metal, then CPU. Override with LOCAL_IMG_DEVICE."""
+    forced = os.environ.get("LOCAL_IMG_DEVICE", "").strip()
+    if forced:
+        return forced
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+DEVICE = _pick_device()
+# Both GPU backends run fp16. CPU lacks fp16 kernels for much of the UNet, so it
+# gets fp32 — twice the memory (~14 GB for SDXL) and still minutes per image.
+DTYPE = torch.float32 if DEVICE == "cpu" else torch.float16
+
+app = FastAPI(title="local-img")
+
+
+# ---------------------------------------------------------------- pipeline ---
+
+class PipelineCache:
+    """Holds at most one pipeline in memory — 16 GB unified memory can't hold two SDXLs."""
+
+    def __init__(self):
+        self.key: str | None = None
+        self.pipe = None
+        self.lock = threading.Lock()
+
+    def get(self, key: str, on_status):
+        if self.key == key and self.pipe is not None:
+            return self.pipe
+
+        if self.pipe is not None:
+            on_status(f"unloading {self.key}")
+            del self.pipe
+            self.pipe = None
+            self.key = None
+            gc.collect()
+            if DEVICE == "mps":
+                torch.mps.empty_cache()
+            elif DEVICE == "cuda":
+                torch.cuda.empty_cache()
+
+        spec = BY_KEY[key]
+        on_status(f"loading {spec.name} (first run downloads ~{spec.download_gb} GB)")
+
+        from diffusers import (
+            DPMSolverMultistepScheduler,
+            StableDiffusionPipeline,
+            StableDiffusionXLPipeline,
+        )
+
+        cls = StableDiffusionXLPipeline if spec.arch == "sdxl" else StableDiffusionPipeline
+        kwargs = dict(torch_dtype=DTYPE, use_safetensors=True)
+        if spec.arch == "sd15":
+            # No content filter. Nothing is blurred or replaced on the way out.
+            kwargs.update(safety_checker=None, requires_safety_checker=False)
+
+        # Multi-GB downloads over a flaky link drop mid-transfer; already-fetched
+        # shards stay in the HF cache, so retrying resumes rather than restarts.
+        last = None
+        for attempt in range(4):
+            try:
+                try:
+                    pipe = cls.from_pretrained(spec.repo, variant="fp16", **kwargs)
+                except (ValueError, OSError, EnvironmentError):
+                    pipe = cls.from_pretrained(spec.repo, **kwargs)
+                break
+            except Exception as exc:
+                last = exc
+                if attempt == 3:
+                    raise RuntimeError(
+                        f"could not fetch {spec.repo} after 4 attempts ({exc}). "
+                        f"Run ./download.sh {spec.key} to prefetch the weights."
+                    ) from exc
+                on_status(f"download interrupted, resuming (attempt {attempt + 2}/4)")
+                time.sleep(2 + 3 * attempt)
+
+        # Distilled turbo models need their shipped scheduler; everything else
+        # converges much better on DPM++ SDE Karras at 25-30 steps.
+        if "turbo" not in spec.key:
+            pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+                pipe.scheduler.config,
+                algorithm_type="sde-dpmsolver++",
+                use_karras_sigmas=True,
+            )
+
+        pipe.set_progress_bar_config(disable=True)
+        pipe = pipe.to(DEVICE)
+        pipe.enable_attention_slicing()
+        pipe.vae.enable_slicing()  # keeps VAE decode of a 1024px latent inside 16 GB
+
+        self.pipe, self.key = pipe, key
+        return pipe
+
+
+CACHE = PipelineCache()
+
+
+# -------------------------------------------------------------------- jobs ---
+
+class Job:
+    def __init__(self, job_id: str):
+        self.id = job_id
+        self.events: queue.Queue = queue.Queue()
+        self.done = False
+
+    def emit(self, **payload):
+        self.events.put(payload)
+
+
+JOBS: dict[str, Job] = {}
+GEN_LOCK = threading.Lock()
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    negative_prompt: str = ""
+    model: str = DEFAULT_MODEL
+    steps: int = Field(default=0, ge=0, le=100)
+    guidance: float = Field(default=-1.0, ge=-1.0, le=20.0)
+    width: int = Field(default=0, ge=0, le=1536)
+    height: int = Field(default=0, ge=0, le=1536)
+    seed: int = -1
+    batch: int = Field(default=1, ge=1, le=4)
+
+
+def run_job(job: Job, req: GenerateRequest):
+    try:
+        spec = BY_KEY[req.model]
+        steps = req.steps or spec.steps
+        guidance = spec.guidance if req.guidance < 0 else req.guidance
+        width = req.width or spec.width
+        height = req.height or spec.height
+        # SD/SDXL UNets require dimensions divisible by 8.
+        width, height = (width // 8) * 8, (height // 8) * 8
+
+        with GEN_LOCK:
+            job.emit(stage="load", message="preparing model")
+            pipe = CACHE.get(req.model, lambda m: job.emit(stage="load", message=m))
+
+            for i in range(req.batch):
+                seed = random.randint(0, 2**31 - 1) if req.seed < 0 else req.seed + i
+                generator = torch.Generator("cpu").manual_seed(seed)
+                started = time.time()
+
+                def on_step(_pipe, step, _t, kwargs, _n=i):
+                    job.emit(
+                        stage="step",
+                        step=step + 1,
+                        total=steps,
+                        index=_n,
+                        batch=req.batch,
+                        elapsed=round(time.time() - started, 1),
+                    )
+                    return kwargs
+
+                call = dict(
+                    prompt=req.prompt,
+                    num_inference_steps=steps,
+                    guidance_scale=guidance,
+                    width=width,
+                    height=height,
+                    generator=generator,
+                    callback_on_step_end=on_step,
+                )
+                if spec.supports_negative and req.negative_prompt.strip():
+                    call["negative_prompt"] = req.negative_prompt
+
+                image = pipe(**call).images[0]
+
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                name = f"{stamp}-{req.model}-{seed}.png"
+                path = OUTPUTS / name
+                image.save(path)
+                meta = {
+                    "prompt": req.prompt,
+                    "negative_prompt": req.negative_prompt,
+                    "model": req.model,
+                    "steps": steps,
+                    "guidance": guidance,
+                    "size": [width, height],
+                    "seed": seed,
+                    "seconds": round(time.time() - started, 1),
+                }
+                path.with_suffix(".json").write_text(json.dumps(meta, indent=2))
+                job.emit(stage="image", url=f"/outputs/{name}", meta=meta)
+
+        job.emit(stage="done")
+    except Exception as exc:  # surfaced verbatim in the UI
+        job.emit(stage="error", message=f"{type(exc).__name__}: {exc}")
+    finally:
+        job.done = True
+
+
+# ------------------------------------------------------------------ routes ---
+
+@app.get("/api/models")
+def list_models():
+    return {
+        "device": DEVICE,
+        "default": DEFAULT_MODEL,
+        "models": [m.to_json() for m in MODELS],
+        "cached": CACHE.key,
+    }
+
+
+@app.post("/api/generate")
+def generate(req: GenerateRequest):
+    if req.model not in BY_KEY:
+        raise HTTPException(400, f"unknown model {req.model}")
+    if not req.prompt.strip():
+        raise HTTPException(400, "prompt is empty")
+    job_id = f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+    job = Job(job_id)
+    JOBS[job_id] = job
+    threading.Thread(target=run_job, args=(job, req), daemon=True).start()
+    return {"job": job_id}
+
+
+@app.get("/api/stream/{job_id}")
+def stream(job_id: str):
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "no such job")
+
+    def events():
+        while True:
+            try:
+                payload = job.events.get(timeout=1.0)
+            except queue.Empty:
+                if job.done and job.events.empty():
+                    break
+                yield ": keepalive\n\n"
+                continue
+            yield f"data: {json.dumps(payload)}\n\n"
+            if payload.get("stage") in ("done", "error"):
+                break
+        JOBS.pop(job_id, None)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/gallery")
+def gallery(limit: int = 40):
+    pngs = sorted(OUTPUTS.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+    items = []
+    for p in pngs[:limit]:
+        meta_path = p.with_suffix(".json")
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        items.append({"url": f"/outputs/{p.name}", "meta": meta})
+    return {"items": items}
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return (ROOT / "web" / "index.html").read_text()
+
+
+@app.get("/outputs/{name}")
+def output(name: str):
+    path = (OUTPUTS / name).resolve()
+    if not str(path).startswith(str(OUTPUTS.resolve())) or not path.exists():
+        raise HTTPException(404)
+    return FileResponse(path)
+
+
+@app.delete("/api/outputs/{name}")
+def delete_output(name: str):
+    path = (OUTPUTS / name).resolve()
+    # Exact parent match, not a string prefix: a sibling outputs-old/ must not
+    # pass, and only a render (plus its sidecar) may ever be unlinked.
+    if path.parent != OUTPUTS.resolve() or path.suffix != ".png" or not path.exists():
+        raise HTTPException(404)
+    path.unlink()
+    path.with_suffix(".json").unlink(missing_ok=True)
+    return {"deleted": name}
+
+
+app.mount("/web", StaticFiles(directory=ROOT / "web"), name="web")
+
+
+if __name__ == "__main__":
+    print(f"\n  local-img — device: {DEVICE}, dtype: {DTYPE}")
+    if DEVICE == "cpu":
+        print("  WARNING: no GPU detected. Expect many minutes per image, and")
+        print("           ~14 GB of RAM for the SDXL models. Try dreamshaper-8.")
+    print("  open http://127.0.0.1:7788\n")
+    uvicorn.run(app, host="127.0.0.1", port=7788, log_level="warning")

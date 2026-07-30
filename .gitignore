@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Generated images and their parameter sidecars — local history, not source.
+outputs/
+
+# Local tooling and development process artifacts.
+.claude/
+.superpowers/
+docs/superpowers/
+
+# macOS
+.DS_Store

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>local-img</title>
+<style>
+  :root {
+    --bg: #0c0d10;
+    --panel: #141619;
+    --panel-2: #1b1e23;
+    --line: #282c33;
+    --text: #e8eaed;
+    --muted: #8b929c;
+    --accent: #7c8cff;
+    --accent-dim: #2b3160;
+    --danger: #ff6b6b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    height: 100vh;
+    overflow: hidden;
+  }
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; overflow: auto; height: auto; }
+  }
+
+  /* ------------------------------------------------------------ sidebar -- */
+  aside {
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 18px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  h1 {
+    font-size: 15px; margin: 0; letter-spacing: .02em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  h1 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  h1 small { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 11px; }
+
+  label { display: block; font-size: 11px; text-transform: uppercase;
+          letter-spacing: .07em; color: var(--muted); margin-bottom: 6px; }
+
+  textarea, select, input[type="number"], input[type="text"] {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px 11px; font: inherit; outline: none; resize: vertical;
+  }
+  textarea:focus, select:focus, input:focus { border-color: var(--accent); }
+  textarea { min-height: 110px; line-height: 1.45; }
+  #negative { min-height: 56px; }
+  select { appearance: none; cursor: pointer;
+           background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                             linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+           background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+           background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+
+  .blurb { font-size: 12px; color: var(--muted); margin-top: 7px; line-height: 1.45; }
+  .tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+  .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+         padding: 2px 7px; border-radius: 20px; background: var(--panel-2);
+         color: var(--muted); border: 1px solid var(--line); }
+  .tag.recommended { background: var(--accent-dim); color: #b9c2ff; border-color: #3b4383; }
+  .tag.uncensored { color: #ffb37a; border-color: #4a3524; background: #241a12; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+  details summary {
+    cursor: pointer; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); list-style: none; user-select: none;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "▸ "; }
+  details[open] summary::before { content: "▾ "; }
+  details > div { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+  button.primary {
+    width: 100%; padding: 12px; border: 0; border-radius: var(--radius);
+    background: var(--accent); color: #0c0d10; font: 600 14px/1 inherit;
+    cursor: pointer; letter-spacing: .01em;
+  }
+  button.primary:hover:not(:disabled) { background: #92a0ff; }
+  button.primary:disabled { background: var(--panel-2); color: var(--muted); cursor: default; }
+
+  /* --------------------------------------------------------------- main -- */
+  main { display: flex; flex-direction: column; overflow: hidden; }
+  .stage {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 24px; overflow: auto; position: relative; min-height: 320px;
+  }
+  .stage img { max-width: 100%; max-height: 100%; border-radius: var(--radius);
+               box-shadow: 0 12px 48px rgba(0,0,0,.55); }
+  .empty { color: var(--muted); text-align: center; max-width: 420px; }
+  .empty h2 { color: var(--text); font-size: 17px; margin: 0 0 8px; font-weight: 600; }
+  .empty p { margin: 0; font-size: 13px; line-height: 1.6; }
+
+  .status {
+    border-top: 1px solid var(--line); background: var(--panel);
+    padding: 10px 18px; display: flex; align-items: center; gap: 14px;
+    font-size: 12px; color: var(--muted); min-height: 44px;
+  }
+  .bar { flex: 1; height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent);
+             transition: width .18s ease; }
+  .status .err { color: var(--danger); }
+  .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, monospace; }
+
+  .gallery {
+    border-top: 1px solid var(--line); background: var(--panel);
+    padding: 12px 18px; display: flex; gap: 10px; overflow-x: auto; min-height: 96px;
+    align-items: center;
+  }
+  .gallery img {
+    height: 72px; width: 72px; object-fit: cover; border-radius: 8px;
+    cursor: pointer; border: 1px solid var(--line);
+  }
+  .gallery img:hover { border-color: var(--accent); }
+  .gallery .placeholder { color: var(--muted); font-size: 12px; }
+
+  .thumb { position: relative; flex: 0 0 auto; line-height: 0; }
+  /* The badge sits inside the thumbnail, not overhanging it — .gallery scrolls
+     with overflow-x: auto, which would clip a negative offset. */
+  .thumb .x {
+    position: absolute; top: 3px; right: 3px; display: none;
+    width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%;
+    background: var(--danger); color: #0c0d10;
+    font-family: inherit; font-weight: 600; font-size: 12px; line-height: 18px;
+    text-align: center; cursor: pointer;
+  }
+  .thumb:hover .x { display: block; }
+
+  .meta { position: absolute; left: 24px; bottom: 24px; background: rgba(12,13,16,.82);
+          backdrop-filter: blur(8px); border: 1px solid var(--line);
+          border-radius: 8px; padding: 8px 11px; font-size: 11px; color: var(--muted);
+          display: none; gap: 12px; }
+  .meta b { color: var(--text); font-weight: 500; }
+
+  .stage .delete {
+    position: absolute; top: 24px; right: 24px; display: none;
+    background: rgba(12,13,16,.82); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 12px; font-family: inherit; font-size: 12px; line-height: 1;
+    color: var(--muted); cursor: pointer;
+  }
+  .stage .delete:hover { border-color: var(--danger); color: var(--danger); }
+</style>
+</head>
+<body>
+
+<aside>
+  <h1><span class="dot"></span> local-img <small id="device">…</small></h1>
+
+  <div>
+    <label for="prompt">Prompt</label>
+    <textarea id="prompt" placeholder="a lone lighthouse on a basalt cliff, storm light, 35mm photograph"></textarea>
+  </div>
+
+  <div>
+    <label for="model">Model</label>
+    <select id="model"></select>
+    <div class="tags" id="tags"></div>
+    <div class="blurb" id="blurb"></div>
+  </div>
+
+  <div id="negwrap">
+    <label for="negative">Negative prompt</label>
+    <textarea id="negative" placeholder="blurry, low quality, watermark, extra fingers"></textarea>
+  </div>
+
+  <details>
+    <summary>Settings</summary>
+    <div>
+      <div class="grid">
+        <div><label for="steps">Steps</label><input type="number" id="steps" min="1" max="100"></div>
+        <div><label for="guidance">Guidance</label><input type="number" id="guidance" min="0" max="20" step="0.5"></div>
+      </div>
+      <div class="grid-3">
+        <div><label for="width">Width</label><input type="number" id="width" step="64" min="256" max="1536"></div>
+        <div><label for="height">Height</label><input type="number" id="height" step="64" min="256" max="1536"></div>
+        <div><label for="batch">Count</label><input type="number" id="batch" min="1" max="4" value="1"></div>
+      </div>
+      <div>
+        <label for="seed">Seed <span style="text-transform:none;letter-spacing:0">(-1 = random)</span></label>
+        <input type="number" id="seed" value="-1">
+      </div>
+    </div>
+  </details>
+
+  <button class="primary" id="go">Generate</button>
+</aside>
+
+<main>
+  <div class="stage" id="stage">
+    <div class="empty" id="empty">
+      <h2>Nothing generated yet</h2>
+      <p>Write a prompt and hit Generate. The first run for a model downloads its
+         weights from Hugging Face; after that everything is local and offline.</p>
+    </div>
+    <div class="meta" id="meta"></div>
+    <button class="delete" id="del">Delete</button>
+  </div>
+
+  <div class="status">
+    <span id="statusText">idle</span>
+    <div class="bar"><i id="barFill"></i></div>
+    <span class="mono" id="statusRight"></span>
+  </div>
+
+  <div class="gallery" id="gallery"><span class="placeholder">No images yet</span></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let MODELS = {}, busy = false, current = null;
+
+async function boot() {
+  const data = await (await fetch('/api/models')).json();
+  $('device').textContent = { mps: 'Metal / MPS', cuda: 'CUDA', cpu: 'CPU — very slow' }[data.device] || data.device;
+  MODELS = Object.fromEntries(data.models.map(m => [m.key, m]));
+  $('model').innerHTML = data.models
+    .map(m => `<option value="${m.key}">${m.name} — ${m.download_gb} GB</option>`).join('');
+  $('model').value = data.default;
+  applyModel();
+  loadGallery();
+}
+
+function applyModel() {
+  const m = MODELS[$('model').value];
+  $('blurb').textContent = `${m.blurb} ${m.speed} on this machine.`;
+  $('tags').innerHTML = m.tags.map(t => `<span class="tag ${t}">${t}</span>`).join('');
+  $('steps').value = m.steps;
+  $('guidance').value = m.guidance;
+  $('width').value = m.width;
+  $('height').value = m.height;
+  $('negwrap').style.display = m.supports_negative ? '' : 'none';
+}
+
+function setStatus(text, right = '', isError = false) {
+  $('statusText').innerHTML = isError ? `<span class="err">${text}</span>` : text;
+  $('statusRight').textContent = right;
+}
+
+async function loadGallery() {
+  const { items } = await (await fetch('/api/gallery')).json();
+  const g = $('gallery');
+  if (!items.length) { g.innerHTML = '<span class="placeholder">No images yet</span>'; return; }
+  g.innerHTML = items.map(i =>
+    `<div class="thumb">
+       <img src="${i.url}" title="${(i.meta.prompt || '').replace(/"/g, '&quot;')}"
+            data-meta='${JSON.stringify(i.meta).replace(/'/g, "&#39;")}'>
+       <button class="x" title="Delete">×</button>
+     </div>`).join('');
+  g.querySelectorAll('.thumb').forEach(thumb => {
+    const img = thumb.querySelector('img');
+    img.onclick = () => show(img.src, JSON.parse(img.dataset.meta || '{}'));
+    thumb.querySelector('.x').onclick = e => {
+      e.stopPropagation();
+      removeImage(img.src.split('/').pop());
+    };
+  });
+}
+
+function show(url, meta) {
+  $('empty').style.display = 'none';
+  let img = $('stage').querySelector('img.result');
+  if (!img) { img = document.createElement('img'); img.className = 'result'; $('stage').prepend(img); }
+  img.src = url;
+  current = url.split('/').pop();
+  $('del').style.display = 'block';
+  if (meta && meta.seed !== undefined) {
+    $('meta').style.display = 'flex';
+    $('meta').innerHTML =
+      `<span>seed <b>${meta.seed}</b></span>` +
+      `<span><b>${meta.size[0]}×${meta.size[1]}</b></span>` +
+      `<span><b>${meta.steps}</b> steps</span>` +
+      `<span>cfg <b>${meta.guidance}</b></span>` +
+      `<span><b>${meta.seconds}s</b></span>`;
+  }
+}
+
+function clearStage() {
+  const img = $('stage').querySelector('img.result');
+  if (img) img.remove();
+  $('empty').style.display = '';
+  $('meta').style.display = 'none';
+  $('del').style.display = 'none';
+  current = null;
+}
+
+async function removeImage(name) {
+  if (!confirm('Delete this image?')) return;
+  const res = await fetch(`/api/outputs/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!res.ok) { setStatus('could not delete that image', '', true); return; }
+  if (name === current) clearStage();
+  loadGallery();
+}
+
+async function generate() {
+  if (busy) return;
+  const prompt = $('prompt').value.trim();
+  if (!prompt) { $('prompt').focus(); return; }
+
+  busy = true;
+  $('go').disabled = true;
+  $('go').textContent = 'Generating…';
+  $('barFill').style.width = '0%';
+  setStatus('starting');
+
+  const body = {
+    prompt,
+    negative_prompt: $('negative').value,
+    model: $('model').value,
+    steps: +$('steps').value,
+    guidance: +$('guidance').value,
+    width: +$('width').value,
+    height: +$('height').value,
+    seed: +$('seed').value,
+    batch: +$('batch').value,
+  };
+
+  let job;
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    job = (await res.json()).job;
+  } catch (e) {
+    setStatus(String(e.message || e), '', true);
+    finish();
+    return;
+  }
+
+  const es = new EventSource(`/api/stream/${job}`);
+  es.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    if (d.stage === 'load') {
+      setStatus(d.message);
+      $('barFill').style.width = '3%';
+    } else if (d.stage === 'step') {
+      const pct = (d.step / d.total) * 100;
+      $('barFill').style.width = pct + '%';
+      const which = d.batch > 1 ? ` · image ${d.index + 1}/${d.batch}` : '';
+      setStatus(`sampling${which}`, `${d.step}/${d.total} · ${d.elapsed}s`);
+    } else if (d.stage === 'image') {
+      show(d.url, d.meta);
+      loadGallery();
+    } else if (d.stage === 'error') {
+      setStatus(d.message, '', true);
+      es.close(); finish();
+    } else if (d.stage === 'done') {
+      $('barFill').style.width = '100%';
+      setStatus('done');
+      es.close(); finish();
+    }
+  };
+  es.onerror = () => { es.close(); finish(); };
+}
+
+function finish() {
+  busy = false;
+  $('go').disabled = false;
+  $('go').textContent = 'Generate';
+}
+
+$('model').onchange = applyModel;
+$('go').onclick = generate;
+$('del').onclick = () => { if (current) removeImage(current); };
+$('prompt').addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate();
+});
+boot();
+</script>
+</body>
+</html>
