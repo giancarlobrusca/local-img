@@ -15,6 +15,7 @@ import json
 import os
 import queue
 import random
+import shutil
 import threading
 import time
 from dataclasses import asdict
@@ -302,6 +303,78 @@ def generate(req: GenerateRequest):
     job = Job(job_id)
     JOBS[job_id] = job
     threading.Thread(target=run_job, args=(job, req), daemon=True).start()
+    return {"job": job_id}
+
+
+# 15% over the pipeline size: the HF cache briefly holds both an incoming blob
+# and its snapshot entry, and Xet keeps a chunk store alongside.
+DISK_HEADROOM = 1.15
+POLL_SECONDS = 0.5
+
+
+def disk_shortfall(spec, free_gb: float) -> str | None:
+    """The refusal message when a download cannot fit, or None when it can."""
+    need = spec.download_gb * DISK_HEADROOM
+    if free_gb >= need:
+        return None
+    return (f"not enough disk: {spec.name} needs {need:.1f} GB "
+            f"and only {free_gb:.1f} GB is free")
+
+
+def _watch_download(job: Job, spec, stop: threading.Event):
+    """Report progress by sampling the size of the repo's blob directory.
+
+    Approximate on purpose, and correct across transfer backends: Xet's chunk
+    store makes a per-file byte counter meaningless, but bytes landing in
+    `blobs/` are bytes landing in `blobs/` either way.
+    """
+    blobs = download.repo_dir(spec.repo) / "blobs"
+    while not stop.wait(POLL_SECONDS):
+        try:
+            done = sum(f.stat().st_size for f in blobs.glob("*") if f.is_file())
+        except OSError:
+            continue
+        gb_done = done / 1e9
+        job.emit(
+            stage="download",
+            pct=min(99, round(gb_done / spec.download_gb * 100)),
+            gb_done=round(gb_done, 2),
+            gb_total=spec.download_gb,
+        )
+
+
+def run_download(job: Job, spec):
+    stop = threading.Event()
+    try:
+        free_gb = shutil.disk_usage(ROOT).free / 1e9
+        problem = disk_shortfall(spec, free_gb)
+        if problem:
+            # Fail before transferring anything rather than filling the disk.
+            job.emit(stage="error", message=problem)
+            return
+
+        job.emit(stage="download", pct=0, gb_done=0.0, gb_total=spec.download_gb)
+        threading.Thread(target=_watch_download, args=(job, spec, stop), daemon=True).start()
+        # download.fetch already retries six times with backoff and resumes from
+        # the cache — no retry logic is duplicated here.
+        download.fetch(spec)
+        job.emit(stage="download", pct=100, gb_done=spec.download_gb, gb_total=spec.download_gb)
+        job.emit(stage="done")
+    except Exception as exc:  # surfaced verbatim in the UI
+        job.emit(stage="error", message=f"{type(exc).__name__}: {exc}")
+    finally:
+        stop.set()
+        job.done = True
+
+
+@app.post("/api/download/{key}")
+def start_download(key: str):
+    if key not in BY_KEY:
+        raise HTTPException(400, f"unknown model {key}")
+    job_id = f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+    job = Job(job_id)
+    JOBS[job_id] = job
+    threading.Thread(target=run_download, args=(job, BY_KEY[key]), daemon=True).start()
     return {"job": job_id}
 
 

@@ -10,6 +10,7 @@ Run: python hardware_test.py
 """
 
 import json
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -560,6 +561,62 @@ def test_is_cached_is_false_for_a_half_finished_download():
     finally:
         download.HUB = real_hub
         shutil.rmtree(fake_hub, ignore_errors=True)
+
+
+# ---------------------------------------------------------------- download ---
+
+def test_disk_shortfall_quotes_both_numbers():
+    import app as app_module
+    from models import BY_KEY
+
+    spec = BY_KEY["dreamshaper-xl-turbo"]     # 6.9 GB -> needs 7.9 GB with headroom
+    check("plenty of room is fine", app_module.disk_shortfall(spec, 500.0) is None)
+    check("exactly enough is fine", app_module.disk_shortfall(spec, 8.0) is None)
+
+    message = app_module.disk_shortfall(spec, 3.0)
+    check("a shortfall is reported", message is not None)
+    check("the message names the free space", "3.0" in message)
+    check("the message names the requirement", "7.9" in message)
+
+
+def test_download_route_rejects_an_unknown_key():
+    # _client_with_temp_profile returns (client, tmp, restore) — see
+    # test_temp_profile_helper_restores_the_global above; restore in finally.
+    client, _, restore = _client_with_temp_profile()
+    try:
+        res = client.post("/api/download/zz-no-such-model")
+        check("400 for an unknown key", res.status_code == 400)
+    finally:
+        restore()
+
+
+def test_download_route_starts_a_job():
+    import app as app_module
+
+    client, _, restore = _client_with_temp_profile()
+    # Never actually transfer 6.9 GB in a test.
+    real_fetch = app_module.download.fetch
+    calls: list = []
+    job_id = ""
+    try:
+        app_module.download.fetch = lambda spec, **kw: calls.append(spec.key)
+        res = client.post("/api/download/dreamshaper-xl-turbo")
+        check("200 for a known key", res.status_code == 200)
+        job_id = res.json().get("job", "")
+        check("a job id comes back", isinstance(job_id, str) and bool(job_id))
+
+        job = app_module.JOBS.get(job_id)
+        check("the job is registered", job is not None)
+        for _ in range(100):                 # up to 5 s
+            if job.done:
+                break
+            time.sleep(0.05)
+        check("the job finished", job.done)
+        check("fetch was called once", calls == ["dreamshaper-xl-turbo"])
+    finally:
+        app_module.download.fetch = real_fetch
+        app_module.JOBS.pop(job_id, None)
+        restore()
 
 
 if __name__ == "__main__":
