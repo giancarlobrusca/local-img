@@ -8,6 +8,9 @@ Weights come from the Hugging Face Hub — public repos, no token, no quota — 
 every image is generated on your own GPU. Hugging Face is only the file host
 here, never an inference API.
 
+![The local-img UI: prompt and model settings on the left, the selected render with its
+parameters in the middle, and the local history along the bottom](docs/screenshot.png)
+
 ## Requirements
 
 | | |
