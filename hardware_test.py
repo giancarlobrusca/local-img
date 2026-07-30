@@ -405,7 +405,10 @@ def _client_with_temp_profile():
 
     hardware.load() and save() read PROFILE_PATH at call time, so patching the
     module global after import is enough — the developer's real
-    .local-img/profile.json is never read or written.
+    .local-img/profile.json is never read or written. Returns a `restore`
+    callable so callers can put the module global back in their own `finally`,
+    matching the monkeypatch/restore pattern used elsewhere in this file (see
+    test_detect_survives_broken_system_calls).
     """
     from fastapi.testclient import TestClient
     import hardware
@@ -414,8 +417,26 @@ def _client_with_temp_profile():
     tmp = ROOT / f"{PREFIX}route-profile.json"
     tmp.unlink(missing_ok=True)
     created.append(tmp)
+    real_path = hardware.PROFILE_PATH
     hardware.PROFILE_PATH = tmp
-    return TestClient(app_module.app), tmp
+
+    def restore():
+        hardware.PROFILE_PATH = real_path
+
+    return TestClient(app_module.app), tmp, restore
+
+
+def test_temp_profile_helper_restores_the_global():
+    import hardware
+
+    real_path = hardware.PROFILE_PATH
+    _client, tmp, restore = _client_with_temp_profile()
+    try:
+        check("the global is patched to the fixture while in use",
+              hardware.PROFILE_PATH == tmp)
+    finally:
+        restore()
+    check("PROFILE_PATH was restored", hardware.PROFILE_PATH == real_path)
 
 
 def test_models_route_without_a_profile():
@@ -423,61 +444,70 @@ def test_models_route_without_a_profile():
     import app as app_module
     from models import DEFAULT_MODEL
 
-    client, _ = _client_with_temp_profile()
-    data = client.get("/api/models").json()
-    check("profile is null before any scan", data["profile"] is None)
-    check("falls back to the hardcoded default", data["default"] == DEFAULT_MODEL)
-    check("every model fits", all(m["fits"] for m in data["models"]))
-    check("nothing is recommended", not any(m["recommended"] for m in data["models"]))
-    check("every model carries an estimate",
-          all("label" in m["estimate"] for m in data["models"]))
+    client, _, restore = _client_with_temp_profile()
+    try:
+        data = client.get("/api/models").json()
+        check("profile is null before any scan", data["profile"] is None)
+        check("falls back to the hardcoded default", data["default"] == DEFAULT_MODEL)
+        check("every model fits", all(m["fits"] for m in data["models"]))
+        check("nothing is recommended", not any(m["recommended"] for m in data["models"]))
+        check("every model carries an estimate",
+              all("label" in m["estimate"] for m in data["models"]))
 
-    # With no profile, a model falls back to "reference" unless this machine's
-    # own render history (outputs/*.json) already clears HISTORY_MIN samples —
-    # in which case history correctly outranks the fallback (see hardware.py
-    # estimate()). Derive the expectation instead of assuming a clean outputs/,
-    # so this holds both on a fresh checkout and on a developer's machine.
-    history = hardware.read_history(app_module.OUTPUTS)
-    expected_source = {
-        m["key"]: ("history" if len(history.get(m["key"], [])) >= hardware.HISTORY_MIN
-                    else "reference")
-        for m in data["models"]
-    }
-    check("estimates use history once recorded, reference otherwise",
-          all(m["estimate"]["source"] == expected_source[m["key"]] for m in data["models"]))
-    check("every model reports readiness",
-          all(isinstance(m["ready"], bool) for m in data["models"]))
+        # With no profile, a model falls back to "reference" unless this machine's
+        # own render history (outputs/*.json) already clears HISTORY_MIN samples —
+        # in which case history correctly outranks the fallback (see hardware.py
+        # estimate()). Derive the expectation instead of assuming a clean outputs/,
+        # so this holds both on a fresh checkout and on a developer's machine.
+        history = hardware.read_history(app_module.OUTPUTS)
+        expected_source = {
+            m["key"]: ("history" if len(history.get(m["key"], [])) >= hardware.HISTORY_MIN
+                        else "reference")
+            for m in data["models"]
+        }
+        check("estimates use history once recorded, reference otherwise",
+              all(m["estimate"]["source"] == expected_source[m["key"]] for m in data["models"]))
+        check("every model reports readiness",
+              all(isinstance(m["ready"], bool) for m in data["models"]))
+    finally:
+        restore()
 
 
 def test_scan_route_persists_and_populates():
-    client, tmp = _client_with_temp_profile()
-    scanned = client.post("/api/hardware/scan", json={}).json()
-    check("scan returns a profile", scanned["profile"] is not None)
-    check("scan is not skipped", scanned["profile"]["skipped"] is False)
-    check("scan wrote the profile", tmp.exists())
+    client, tmp, restore = _client_with_temp_profile()
+    try:
+        scanned = client.post("/api/hardware/scan", json={}).json()
+        check("scan returns a profile", scanned["profile"] is not None)
+        check("scan is not skipped", scanned["profile"]["skipped"] is False)
+        check("scan wrote the profile", tmp.exists())
 
-    data = client.get("/api/models").json()
-    check("the profile survives into /api/models", data["profile"] is not None)
-    check("the tier is set", data["profile"]["tier"] in ("cpu", "low", "mid", "high", "ultra"))
-    fitting = [m for m in data["models"] if m["fits"]]
-    check("at least one model fits this machine", len(fitting) >= 1)
-    check("exactly one model is recommended",
-          sum(1 for m in data["models"] if m["recommended"]) == 1)
-    check("the default is the recommendation",
-          data["default"] == next(m["key"] for m in data["models"] if m["recommended"]))
-    check("non-fitting models carry a reason",
-          all(m["reason"] for m in data["models"] if not m["fits"]))
+        data = client.get("/api/models").json()
+        check("the profile survives into /api/models", data["profile"] is not None)
+        check("the tier is set", data["profile"]["tier"] in ("cpu", "low", "mid", "high", "ultra"))
+        fitting = [m for m in data["models"] if m["fits"]]
+        check("at least one model fits this machine", len(fitting) >= 1)
+        check("exactly one model is recommended",
+              sum(1 for m in data["models"] if m["recommended"]) == 1)
+        check("the default is the recommendation",
+              data["default"] == next(m["key"] for m in data["models"] if m["recommended"]))
+        check("non-fitting models carry a reason",
+              all(m["reason"] for m in data["models"] if not m["fits"]))
+    finally:
+        restore()
 
 
 def test_scan_route_can_persist_a_skip():
-    client, tmp = _client_with_temp_profile()
-    data = client.post("/api/hardware/scan", json={"skip": True}).json()
-    check("skip returns a profile", data["profile"] is not None)
-    check("skip is recorded", data["profile"]["skipped"] is True)
-    check("skip was persisted", tmp.exists())
-    check("skip: everything fits", all(m["fits"] for m in data["models"]))
-    check("skip: nothing recommended", not any(m["recommended"] for m in data["models"]))
-    check("skip: max_batch is 4", all(m["max_batch"] == 4 for m in data["models"]))
+    client, tmp, restore = _client_with_temp_profile()
+    try:
+        data = client.post("/api/hardware/scan", json={"skip": True}).json()
+        check("skip returns a profile", data["profile"] is not None)
+        check("skip is recorded", data["profile"]["skipped"] is True)
+        check("skip was persisted", tmp.exists())
+        check("skip: everything fits", all(m["fits"] for m in data["models"]))
+        check("skip: nothing recommended", not any(m["recommended"] for m in data["models"]))
+        check("skip: max_batch is 4", all(m["max_batch"] == 4 for m in data["models"]))
+    finally:
+        restore()
 
 
 def test_is_cached_reports_a_bool_for_every_model():
@@ -485,6 +515,51 @@ def test_is_cached_reports_a_bool_for_every_model():
     from models import MODELS
     check("is_cached never raises",
           all(isinstance(download.is_cached(s), bool) for s in MODELS))
+
+
+def test_is_cached_is_false_for_a_half_finished_download():
+    """A model_index.json plus a dangling weight symlink — the real shape of a
+    download that dropped mid-transfer: hf_hub_download creates the snapshot
+    symlink first and writes the blob it points at afterward, so an
+    interrupted pull leaves exactly this: a symlink whose target does not
+    exist. Naively checking "the snapshot directory exists" would misread
+    that as cached; is_cached must not.
+
+    HUB is monkeypatched to a zz- fixture directory for the duration of this
+    test and restored in the finally block — this never touches the real
+    ~/.cache/huggingface tree.
+    """
+    import shutil
+    import types
+    import download
+
+    real_hub = download.HUB
+    fake_hub = ROOT / f"{PREFIX}hf-cache"
+    snap = fake_hub / "models--zz-fake--half-done" / "snapshots" / "onlysnap"
+    unet = snap / "unet"
+    try:
+        download.HUB = fake_hub
+        unet.mkdir(parents=True)
+        (snap / "model_index.json").write_text(json.dumps({
+            "_class_name": "StableDiffusionPipeline",
+            "unet": ["diffusers", "UNet2DConditionModel"],
+        }))
+        # The symlink hf_hub_download would have created, pointing at a blob
+        # that never finished downloading — so the target does not exist.
+        missing_blob = fake_hub / "does-not-exist.bin"
+        weight = unet / "diffusion_pytorch_model.safetensors"
+        weight.symlink_to(missing_blob)
+
+        needed = download.needed_files(snap)
+        check("the dangling weight file is part of what the pipeline needs",
+              weight in needed)
+
+        spec = types.SimpleNamespace(repo="zz-fake/half-done")
+        check("is_cached is False for a dangling weight symlink",
+              download.is_cached(spec) is False)
+    finally:
+        download.HUB = real_hub
+        shutil.rmtree(fake_hub, ignore_errors=True)
 
 
 if __name__ == "__main__":
