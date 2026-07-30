@@ -239,7 +239,7 @@ async function boot() {
 
 function applyModel() {
   const m = MODELS[$('model').value];
-  $('blurb').textContent = `${m.blurb} ${m.speed} on this machine.`;
+  $('blurb').textContent = m.blurb;
   $('tags').innerHTML = m.tags.map(t => `<span class="tag ${t}">${t}</span>`).join('');
   $('steps').value = m.steps;
   $('guidance').value = m.guidance;
