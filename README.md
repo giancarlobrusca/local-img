@@ -1,5 +1,7 @@
 # local-img
 
+**English** · [Español](README.es.md)
+
 Local text-to-image generation. Prompt in a browser, PNG out. No API keys, no
 cloud, no content filtering. After the first weight download it runs fully
 offline.
