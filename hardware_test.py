@@ -398,6 +398,95 @@ def test_read_history_on_a_missing_directory():
           hardware.read_history(ROOT / f"{PREFIX}absent-dir") == {})
 
 
+# ------------------------------------------------------------------ routes ---
+
+def _client_with_temp_profile():
+    """A TestClient whose profile path points at a zz- fixture.
+
+    hardware.load() and save() read PROFILE_PATH at call time, so patching the
+    module global after import is enough — the developer's real
+    .local-img/profile.json is never read or written.
+    """
+    from fastapi.testclient import TestClient
+    import hardware
+    import app as app_module
+
+    tmp = ROOT / f"{PREFIX}route-profile.json"
+    tmp.unlink(missing_ok=True)
+    created.append(tmp)
+    hardware.PROFILE_PATH = tmp
+    return TestClient(app_module.app), tmp
+
+
+def test_models_route_without_a_profile():
+    import hardware
+    import app as app_module
+    from models import DEFAULT_MODEL
+
+    client, _ = _client_with_temp_profile()
+    data = client.get("/api/models").json()
+    check("profile is null before any scan", data["profile"] is None)
+    check("falls back to the hardcoded default", data["default"] == DEFAULT_MODEL)
+    check("every model fits", all(m["fits"] for m in data["models"]))
+    check("nothing is recommended", not any(m["recommended"] for m in data["models"]))
+    check("every model carries an estimate",
+          all("label" in m["estimate"] for m in data["models"]))
+
+    # With no profile, a model falls back to "reference" unless this machine's
+    # own render history (outputs/*.json) already clears HISTORY_MIN samples —
+    # in which case history correctly outranks the fallback (see hardware.py
+    # estimate()). Derive the expectation instead of assuming a clean outputs/,
+    # so this holds both on a fresh checkout and on a developer's machine.
+    history = hardware.read_history(app_module.OUTPUTS)
+    expected_source = {
+        m["key"]: ("history" if len(history.get(m["key"], [])) >= hardware.HISTORY_MIN
+                    else "reference")
+        for m in data["models"]
+    }
+    check("estimates use history once recorded, reference otherwise",
+          all(m["estimate"]["source"] == expected_source[m["key"]] for m in data["models"]))
+    check("every model reports readiness",
+          all(isinstance(m["ready"], bool) for m in data["models"]))
+
+
+def test_scan_route_persists_and_populates():
+    client, tmp = _client_with_temp_profile()
+    scanned = client.post("/api/hardware/scan", json={}).json()
+    check("scan returns a profile", scanned["profile"] is not None)
+    check("scan is not skipped", scanned["profile"]["skipped"] is False)
+    check("scan wrote the profile", tmp.exists())
+
+    data = client.get("/api/models").json()
+    check("the profile survives into /api/models", data["profile"] is not None)
+    check("the tier is set", data["profile"]["tier"] in ("cpu", "low", "mid", "high", "ultra"))
+    fitting = [m for m in data["models"] if m["fits"]]
+    check("at least one model fits this machine", len(fitting) >= 1)
+    check("exactly one model is recommended",
+          sum(1 for m in data["models"] if m["recommended"]) == 1)
+    check("the default is the recommendation",
+          data["default"] == next(m["key"] for m in data["models"] if m["recommended"]))
+    check("non-fitting models carry a reason",
+          all(m["reason"] for m in data["models"] if not m["fits"]))
+
+
+def test_scan_route_can_persist_a_skip():
+    client, tmp = _client_with_temp_profile()
+    data = client.post("/api/hardware/scan", json={"skip": True}).json()
+    check("skip returns a profile", data["profile"] is not None)
+    check("skip is recorded", data["profile"]["skipped"] is True)
+    check("skip was persisted", tmp.exists())
+    check("skip: everything fits", all(m["fits"] for m in data["models"]))
+    check("skip: nothing recommended", not any(m["recommended"] for m in data["models"]))
+    check("skip: max_batch is 4", all(m["max_batch"] == 4 for m in data["models"]))
+
+
+def test_is_cached_reports_a_bool_for_every_model():
+    import download
+    from models import MODELS
+    check("is_cached never raises",
+          all(isinstance(download.is_cached(s), bool) for s in MODELS))
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]

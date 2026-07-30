@@ -17,6 +17,7 @@ import queue
 import random
 import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
@@ -29,6 +30,8 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import download
+import hardware
 from models import BY_KEY, DEFAULT_MODEL, MODELS
 
 ROOT = Path(__file__).parent
@@ -234,14 +237,59 @@ def run_job(job: Job, req: GenerateRequest):
 
 # ------------------------------------------------------------------ routes ---
 
-@app.get("/api/models")
-def list_models():
+def catalog_payload():
+    """The catalog as the browser sees it: specs plus fit, estimate, readiness.
+
+    app.py computes nothing here — hardware.py decides what fits and how long it
+    takes, and this function only assembles the answer.
+    """
+    profile = hardware.load()
+    fits = hardware.fit_all(profile, MODELS)
+    history = hardware.read_history(OUTPUTS)
+
+    models = []
+    for spec in MODELS:
+        fit = fits[spec.key]
+        est = hardware.estimate(profile, spec, history.get(spec.key, []))
+        models.append({
+            **spec.to_json(),
+            "fits": fit.fits,
+            "reason": fit.reason,
+            "max_batch": fit.max_batch,
+            "recommended": fit.recommended,
+            "estimate": asdict(est),
+            "ready": download.is_cached(spec),
+        })
+
+    picked = next((m["key"] for m in models if m["recommended"]), DEFAULT_MODEL)
     return {
         "device": DEVICE,
-        "default": DEFAULT_MODEL,
-        "models": [m.to_json() for m in MODELS],
-        "cached": CACHE.key,
+        "default": picked,
+        "profile": asdict(profile) if profile else None,
+        "models": models,
+        "cached": CACHE.key,     # the pipeline resident in memory, if any
     }
+
+
+class ScanRequest(BaseModel):
+    skip: bool = False
+
+
+@app.get("/api/models")
+def list_models():
+    return catalog_payload()
+
+
+@app.post("/api/hardware/scan")
+def scan_hardware(req: ScanRequest = ScanRequest()):
+    """Measure the machine and persist the result — or persist a declined scan.
+
+    A skipped profile is a record of a choice, not a measurement: it shows the
+    full catalog, recommends nothing, and leaves the offer to analyze standing.
+    """
+    profile = hardware.skipped_profile(DEVICE) if req.skip else hardware.detect(DEVICE)
+    hardware.save(profile)
+    return catalog_payload()
 
 
 @app.post("/api/generate")

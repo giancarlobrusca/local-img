@@ -159,6 +159,22 @@ def prune():
     print(f"\n=== reclaimed {total / 1e9:.1f} GB")
 
 
+def is_cached(spec) -> bool:
+    """Whether this model's weights are already on disk.
+
+    A snapshot counts only when every file the pipeline loads is present, so a
+    half-finished download does not read as ready.
+    """
+    snapshots = repo_dir(spec.repo) / "snapshots"
+    if not snapshots.is_dir():
+        return False
+    for snap in snapshots.iterdir():
+        files = needed_files(snap)
+        if files and all(p.exists() for p in files):
+            return True
+    return False
+
+
 if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
 
