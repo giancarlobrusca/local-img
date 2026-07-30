@@ -6,6 +6,9 @@ __pycache__/
 # Generated images and their parameter sidecars — local history, not source.
 outputs/
 
+# The detected hardware profile — describes the developer's machine, not the project.
+.local-img/
+
 # Local tooling and development process artifacts.
 .claude/
 .superpowers/
