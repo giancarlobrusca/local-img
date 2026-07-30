@@ -262,6 +262,26 @@ def test_detect_survives_broken_system_calls():
     check("subprocess.run was restored", hardware.subprocess.run is real_run)
 
 
+def test_detect_falls_back_when_something_unexpected_raises():
+    import hardware
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("something broke")
+
+    real_derive_tier = hardware.derive_tier
+    try:
+        hardware.derive_tier = boom
+        prof = hardware.detect("mps")
+    finally:
+        hardware.derive_tier = real_derive_tier
+
+    check("detection returned a profile", isinstance(prof, hardware.HardwareProfile))
+    check("the profile is flagged partial", prof.partial is True)
+    check("budget_gb is still positive", prof.budget_gb > 0)
+    check("tier is one of the known values", prof.tier in ("cpu", "low", "mid", "high", "ultra"))
+    check("derive_tier was restored", hardware.derive_tier is real_derive_tier)
+
+
 def test_skipped_profile():
     import hardware
     from models import MODELS

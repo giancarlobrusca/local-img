@@ -305,10 +305,10 @@ def detect(device: str, specs=None) -> HardwareProfile:
     `device` comes from app._pick_device(); passing it in rather than computing
     it here is what keeps this module free of an import cycle.
     """
-    if specs is None:
-        from models import MODELS as specs
-
     try:
+        if specs is None:
+            from models import MODELS as specs
+
         flags: list = []
         system = platform_mod.system()
 
