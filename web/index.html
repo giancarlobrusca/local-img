@@ -117,7 +117,7 @@
   .bar { flex: 1; height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
   .bar > i { display: block; height: 100%; width: 0; background: var(--accent);
              transition: width .18s ease; }
-  .err { color: var(--danger); }
+  .status .err, .card .err { color: var(--danger); }
   .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, monospace; }
 
   .gallery {
@@ -494,7 +494,7 @@ async function runAnalysis() {
   try {
     data = await scan(false);
   } catch (e) {
-    $('wizError').textContent = `Could not analyze this machine — ${e.message || e}`;
+    $('wizError').textContent = `could not analyze this machine — ${e.message || e}`;
     $('wizError').hidden = false;
     return;
   } finally {
