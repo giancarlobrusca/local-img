@@ -45,8 +45,11 @@ more system RAM.
 **Speed estimates start as estimates.** Each model shows a per-image time scaled
 from a reference machine (M1 Pro, 16-core GPU). Once you have generated three
 images with a model, the app switches to the median of your own recorded times
-and says so. The NVIDIA scaling factors are uncalibrated guesses until that
-happens — this project has no NVIDIA hardware to measure against.
+and says so. The NVIDIA scaling factors are still mostly guesses: exactly one
+NVIDIA machine has been measured (an RTX 3050 Laptop — see the baselines below),
+and it came in about **twice as slow** as `cuda_perf_factor()` predicted for an
+unrecognized card. Treat the first-run number on any NVIDIA GPU as optimistic
+until your own three renders replace it.
 
 ## Setup
 
@@ -69,9 +72,35 @@ cache, so rerunning never restarts from zero.
 ./download.sh prune             # drop cached files no pipeline loads
 ```
 
+### Windows
+
+The shell scripts are macOS/Linux only — a Windows venv puts its interpreter in
+`.venv\Scripts\`, not `.venv/bin/`. The equivalent, in PowerShell:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv .venv
+.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe download.py dreamshaper-8
+.venv\Scripts\python.exe app.py                    # → http://127.0.0.1:7788
+```
+
+Installing torch from the CUDA index **first** is the step that matters. PyPI's
+Windows torch wheel is CPU-only, so a plain `pip install -r requirements.txt`
+yields an app that starts, runs, and quietly reports `device: cpu` — correct
+images at a fraction of the speed, with no error to tell you why. Doing it in
+this order leaves the CUDA build in place, since the later `torch>=2.4` is
+already satisfied. Pick the index tag that matches your driver's CUDA version,
+which `nvidia-smi` prints in its top-right corner.
+
+Name the 3.12 interpreter explicitly rather than using `py` or `python`: on a
+machine where 3.13 is the default, torch has no wheel and the install fails at
+resolution time. To force a device, set the variable for the session first:
+`$env:LOCAL_IMG_DEVICE = "cpu"`.
+
 ## Models
 
-Nine models spanning 8 GB laptops to 64 GB workstations. Every repo is public and
+Ten models spanning 4 GB laptop GPUs to 64 GB workstations. Every repo is public and
 resolves without a Hugging Face token. The gated repos — FLUX.1-schnell,
 FLUX.1-dev, and the Stable Diffusion 3.5 family — are deliberately absent: they
 return `GatedRepoError: 401` anonymously, and this app has nowhere to put a token.
@@ -101,6 +130,17 @@ DreamShaper 8 at 512×512/20 steps → **18.8 s**; DreamShaper XL Turbo at
 from those per-step costs. The flux numbers are the least certain of all: no flux
 model fits in this machine's 11.8 GB of usable memory, so that path is untested
 here and its memory requirements are conservative estimates.
+
+One NVIDIA machine has been measured since — an **RTX 3050 Laptop, 4 GB VRAM**
+(Windows 11, driver 577, CUDA 12.9), which is the smallest card the catalog
+admits. SD Turbo at 512×512/2 steps → **1.1 s**; DreamShaper 8 at 512×768/25
+steps → **12.4 s**; LCM DreamShaper v7 at 768×768/6 steps → **8.4 s**. Peak GPU
+memory across the whole card, desktop included, was 2.9 / 3.6 / 3.8 GB: all three
+SD 1.5-family entries do clear a 4 GB card, but the 768px one leaves under
+200 MB spare, so a second GPU-hungry app open at the same time is the difference
+between a render and an out-of-memory error. Against the only baseline that was
+itself measured, that card's real scaling factor is about **1.4** — well under
+the 3.0 `hardware.py` assumes for a card it does not recognize.
 
 Disk sizes are what the pipeline actually loads. The repos themselves are much
 larger — dreamshaper-xl-v2-turbo is 41.6 GB in full, because it also ships three
