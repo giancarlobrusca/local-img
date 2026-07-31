@@ -298,13 +298,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_free_port_is_bindable_and_not_reserved() {
-        let port = free_port().unwrap();
-        assert!(port >= 1024, "an ephemeral port is never privileged");
-        // Asking twice must not hand out the same port twice in a row while
-        // the first is still notionally in play.
-        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
-        drop(listener);
+    fn a_free_port_is_plausible_and_not_privileged() {
+        let first = free_port().unwrap();
+        assert!(first >= 1024, "an ephemeral port is never privileged");
+        assert_ne!(first, 0, "0 means 'pick one for me', never an answer");
+
+        let second = free_port().unwrap();
+        assert!(second >= 1024);
+
+        // Deliberately NOT asserted: that `first` can be re-bound right now.
+        // free_port() closes its listener before returning, so the port is up
+        // for grabs from that instant — under a parallel test run the kernel
+        // hands it back out often enough that asserting otherwise flakes
+        // (observed failing ~60% of full-suite runs on macOS with
+        // AddrInUse/errno 48). That race is real and unavoidable without
+        // handing a bound socket to a Python child, which is not possible
+        // here. `start()` answers it by retrying on an address collision
+        // rather than by pretending it cannot happen — so a test asserting it
+        // cannot happen would contradict the design it is meant to protect.
     }
 
     #[test]
