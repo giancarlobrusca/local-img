@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>local-img — image generation that stays on your computer</title>
+<meta name="description" content="Generate images on your own GPU. No account, no API key, no cloud, no content filter. Download for macOS, Windows or Linux.">
+<meta property="og:title" content="local-img">
+<meta property="og:description" content="Image generation that never leaves your computer.">
+<meta property="og:image" content="preview.jpg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main class="wrap">
+
+  <!-- ------------------------------------------------------------ hero -->
+  <section class="hero">
+    <div class="eyebrow"><b>local-img</b> · macOS · Windows · Linux · MIT</div>
+    <div class="stack">
+      <h1>Image generation that never leaves your computer.</h1>
+      <p class="lead">
+        Type a prompt, get a PNG. It runs on <strong>your own graphics card</strong>,
+        so nothing you write and nothing you make is ever uploaded, logged, or
+        reviewed. After the first download it works with the wi-fi off.
+      </p>
+      <div class="nots">
+        <span class="not">no account</span>
+        <span class="not">no API key</span>
+        <span class="not">no subscription</span>
+        <span class="not">no content filter</span>
+        <span class="not">no terminal</span>
+      </div>
+    </div>
+
+    <div class="downloads">
+      <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest">
+        <span class="os">macOS</span>
+        <span class="meta">Apple Silicon · M1 and later</span>
+        <span class="file">local-img.dmg</span>
+      </a>
+      <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest">
+        <span class="os">Windows</span>
+        <span class="meta">10 / 11 · 64-bit · NVIDIA</span>
+        <span class="file">local-img.msi</span>
+      </a>
+      <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest">
+        <span class="os">Linux</span>
+        <span class="meta">64-bit · NVIDIA</span>
+        <span class="file">.AppImage / .deb</span>
+      </a>
+    </div>
+
+    <p class="unsigned">
+      The builds aren't signed — signing certificates cost money every year and this
+      is free — so your computer will warn you once when you open it.
+      <a href="#security">Here's exactly what it says and what to click.</a>
+    </p>
+  </section>
+
+  <!-- ------------------------------------------------------------ shot -->
+  <section>
+    <figure>
+      <div class="shot">
+        <img src="preview.jpg" width="1280" height="800"
+             alt="The local-img window: prompt and model settings on the left, the selected render in the middle, and a strip of previous images along the bottom.">
+      </div>
+      <figcaption>
+        Prompt and settings on the left, your render in the middle, everything you've
+        made along the bottom. Images are saved to your Pictures folder as ordinary PNGs.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ----------------------------------------------------- first launch -->
+  <section>
+    <div class="label">The first time you open it</div>
+    <div class="col stack" style="margin-bottom: 30px;">
+      <h2>It sets itself up. You don't install anything else.</h2>
+      <p class="lead">
+        Most tools like this ask you to install Python, then a package manager, then
+        a list of libraries. This one brings its own and puts them somewhere it can
+        clean up after itself.
+      </p>
+    </div>
+    <ol class="steps">
+      <li>
+        <div>
+          <h3>It downloads its engine</h3>
+          <p>
+            About 1 GB on a Mac, or up to 7 GB on a PC with an NVIDIA card, where the
+            graphics libraries are much larger. This happens once. You'll see a
+            progress bar, and you can close the window and come back.
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>It measures your machine</h3>
+          <p>
+            It reads your chip, how much memory your graphics card will actually hand
+            over, and how much disk is free — then shows you only the models that will
+            genuinely run, with the rest listed alongside the number that blocks them.
+            Nothing about your machine is sent anywhere.
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>It recommends one model, and asks before downloading it</h3>
+          <p>
+            Models are between 2 GB and 34 GB, so it tells you the size and waits.
+            From then on you're generating images, and the app works offline.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- --------------------------------------------------------- hardware -->
+  <section>
+    <div class="label">What your machine can run</div>
+    <div class="col stack" style="margin-bottom: 30px;">
+      <h2>Memory decides everything.</h2>
+      <p class="lead">
+        You don't need to know any of this — the app works it out and hides what won't
+        fit. It's here because it's the honest answer to "will this work on my laptop?"
+      </p>
+    </div>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Model</th>
+            <th scope="col">Download</th>
+            <th scope="col">Needs</th>
+            <th scope="col">Per image</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">DreamShaper 8</td>
+            <td class="num">2.1 GB</td>
+            <td class="num">3 GB GPU · 8 GB RAM</td>
+            <td class="num measured">~18 s</td>
+          </tr>
+          <tr>
+            <td class="name">SD Turbo</td>
+            <td class="num">2.6 GB</td>
+            <td class="num">3 GB GPU · 8 GB RAM</td>
+            <td class="num">~2 s</td>
+          </tr>
+          <tr>
+            <td class="name">DreamShaper XL v2 Turbo</td>
+            <td class="num">6.9 GB</td>
+            <td class="num">9.5 GB GPU · 16 GB RAM</td>
+            <td class="num measured">~40 s</td>
+          </tr>
+          <tr>
+            <td class="name">Juggernaut XL v9</td>
+            <td class="num">7.1 GB</td>
+            <td class="num">9.5 GB GPU · 16 GB RAM</td>
+            <td class="num">~180 s</td>
+          </tr>
+          <tr>
+            <td class="name">Shuttle 3 Diffusion</td>
+            <td class="num">33.7 GB</td>
+            <td class="num">26 GB GPU · 48 GB RAM</td>
+            <td class="num">~120 s</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="footnote">
+      Ten models ship in total; these are five of them. Times in
+      <span class="measured">this colour</span> were measured on an M1 Pro — the rest
+      are estimates until the app has watched your machine do it three times, after
+      which it uses your own numbers and says so.
+    </p>
+  </section>
+
+  <!-- --------------------------------------------------------- security -->
+  <section id="security">
+    <div class="label">The security warning</div>
+    <div class="col stack" style="margin-bottom: 30px;">
+      <h2>Your computer will stop you once. This is how to get past it.</h2>
+      <p class="lead">
+        Both systems warn about apps from developers who haven't paid for a signing
+        certificate. It's a one-time click, and your machine remembers.
+      </p>
+    </div>
+    <div class="prompts">
+      <div class="prompt">
+        <h3>macOS</h3>
+        <p class="quote">“local-img cannot be opened because the developer cannot be verified.”</p>
+        <p>
+          Right-click the app in your Applications folder, choose <kbd>Open</kbd>, then
+          <kbd>Open</kbd> again in the box that appears. Double-clicking it normally
+          won't work the first time — you have to right-click.
+        </p>
+      </div>
+      <div class="prompt">
+        <h3>Windows</h3>
+        <p class="quote">“Windows protected your PC.”</p>
+        <p>
+          Click <kbd>More info</kbd>, which reveals a button, then
+          <kbd>Run anyway</kbd>. The button is hidden until you click More info,
+          which is the part most people miss.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- source -->
+  <section>
+    <div class="label">Or build it yourself</div>
+    <div class="col stack" style="margin-bottom: 26px;">
+      <h2>Nothing here is hidden.</h2>
+      <p class="lead">
+        If you'd rather not click past a security warning, or you want to read what
+        you're running first, the whole thing is on GitHub and installs from source
+        on any machine with Python 3.11 or 3.12.
+      </p>
+    </div>
+    <pre><span class="c"># macOS or Linux</span>
+git clone https://github.com/giancarlobrusca/local-img
+cd local-img
+./setup.sh   <span class="c"># Python venv + libraries, a few minutes</span>
+./run.sh     <span class="c"># → http://127.0.0.1:7788</span></pre>
+  </section>
+
+  <footer>
+    <span>MIT licensed</span>
+    <span>Model weights carry their own licences</span>
+    <span class="sep"></span>
+    <a href="https://github.com/giancarlobrusca/local-img">Source on GitHub</a>
+  </footer>
+
+</main>
+
+</body>
+</html>

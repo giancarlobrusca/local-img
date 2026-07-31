@@ -24,6 +24,18 @@ jobs:
       - run: python delete_test.py
       - run: python hardware_test.py
 
+  landing:
+    name: landing pages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # No pip install: landing_test.py is standard library only, so a docs
+      # change gets its answer in seconds instead of after a torch download.
+      - run: python landing_test.py
+
   bootstrap:
     name: bootstrap on ${{ matrix.os }}
     strategy:
