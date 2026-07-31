@@ -40,28 +40,28 @@
          data-verb="Download for"
          data-others="Also for:"
          data-mobile="This is a desktop application — open this page on the computer you want to run it on."
-         data-mac="Apple Silicon · M1 and later"
-         data-windows="10 / 11 · 64-bit · NVIDIA"
-         data-linux="64-bit · NVIDIA · .AppImage">
+         data-mac="Apple Silicon · M1 and later · 3.4 MB"
+         data-windows="10 / 11 · 64-bit · NVIDIA · 4.0 MB"
+         data-linux="64-bit · NVIDIA · .AppImage · 81.8 MB">
       <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-macos-arm64.dmg">
         <span class="os">macOS</span>
         <span class="meta">Apple Silicon · M1 and later</span>
-        <span class="file">.dmg</span>
+        <span class="file">.dmg · 3.4 MB</span>
       </a>
       <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-windows-x64.msi">
         <span class="os">Windows</span>
         <span class="meta">10 / 11 · 64-bit · NVIDIA</span>
-        <span class="file">.msi</span>
+        <span class="file">.msi · 4.0 MB</span>
       </a>
       <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-linux-x64.AppImage">
         <span class="os">Linux</span>
         <span class="meta">64-bit · NVIDIA</span>
-        <span class="file">.AppImage</span>
+        <span class="file">.AppImage · 81.8 MB</span>
       </a>
       <a class="dl dl-sub" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-linux-x64.deb">
         <span class="os">Linux</span>
         <span class="meta">Debian, Ubuntu and derivatives</span>
-        <span class="file">.deb</span>
+        <span class="file">.deb · 4.3 MB</span>
       </a>
     </div>
 
@@ -69,6 +69,10 @@
       The builds aren't signed — signing certificates cost money every year and this
       is free — so your computer will warn you once when you open it.
       <a href="#security">Here's exactly what it says and what to click.</a>
+    </p>
+    <p class="unsigned">
+      The AppImage is so much bigger than the .deb because it bundles its own webview
+      runtime so it runs on any distro; the .deb uses the system's instead.
     </p>
   </section>
 

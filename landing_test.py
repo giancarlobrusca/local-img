@@ -144,7 +144,7 @@ def test_each_page_declares_the_other() -> None:
 def test_both_languages_state_the_same_numbers() -> None:
     # Model sizes, memory floors and timings are facts, not copy. A number
     # that drifts in one language is a page quietly lying to half its readers.
-    pattern = re.compile(r"\d+(?:\.\d+)?\s*(?:GB|s)\b")
+    pattern = re.compile(r"\d+(?:\.\d+)?\s*(?:GB|MB|s)\b")
     en = sorted(pattern.findall(read("index.html")))
     es = sorted(pattern.findall(read("es/index.html")))
     check("English and Spanish quote the same figures", en == es)
