@@ -74,6 +74,22 @@ def test_no_versioned_filenames() -> None:
         check(f"{name} names no versioned bundle", "local-img_" not in text)
 
 
+def test_detection_script_is_wired() -> None:
+    en = read("index.html")
+    check("the English page loads download.js",
+          'src="download.js"' in en)
+    check("the fallback grid keeps its id", 'id="downloads"' in en)
+
+    js = read("download.js")
+    check("download.js exists", len(js) > 200)
+    check("download.js exposes the pure function for testing",
+          "window.localImgPickPlatform" in js)
+    check("download.js refuses to guess on touch devices",
+          "maxTouchPoints" in js)
+    for asset in ASSETS[:3]:      # the .deb is reached through the others line
+        check(f"download.js knows {asset}", asset in js)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
