@@ -17,6 +17,9 @@ pub struct Progress {
     /// "python" while the runtime downloads and extracts, "deps" during pip,
     /// "server" while waiting for the child to answer.
     pub phase: &'static str,
+    /// 0..=100, or 255 meaning "this is subtext only — leave the bar alone".
+    /// pip prints far more often than the bar moves; tying the two together
+    /// would make it stutter.
     pub pct: u8,
     /// The line shown underneath the bar. pip's current output, mostly.
     pub detail: String,

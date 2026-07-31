@@ -5,6 +5,7 @@
 // removes this line and fixes whatever it was hiding.
 #![allow(dead_code)]
 
+mod bootstrap;
 mod events;
 mod layout;
 mod plan;
