@@ -27,8 +27,6 @@ use std::time::Duration;
 pub struct Report {
     /// Printed by `--bootstrap-only` so the CI job can calibrate the progress
     /// constants in plan.rs against a real install.
-    // Nothing in the GUI path reads it; Task 11's cli.rs is what prints it.
-    #[allow(dead_code)]
     pub site_packages_bytes: u64,
 }
 

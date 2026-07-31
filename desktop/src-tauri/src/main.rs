@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bootstrap;
+mod cli;
 mod events;
 mod layout;
 mod plan;
@@ -251,6 +252,13 @@ fn reinstall_engine(app: AppHandle, window: WebviewWindow) {
 }
 
 fn main() {
+    // Handled before Tauri exists, and this is not a convenience: a Linux CI
+    // runner has no display, so constructing the webview would fail long
+    // before the bootstrap — the thing under test — got to run.
+    if std::env::args().any(|a| a == "--bootstrap-only") {
+        std::process::exit(cli::bootstrap_only());
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

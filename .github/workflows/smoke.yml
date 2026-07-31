@@ -1,0 +1,91 @@
+name: smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: python checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # paths_test and shell_test import app, which imports torch. The CPU
+      # wheel is a fraction of the CUDA one and is all these need.
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+      - run: pip install -r requirements.txt
+      - run: python paths_test.py
+      - run: python shell_test.py
+      - run: python delete_test.py
+      - run: python hardware_test.py
+
+  bootstrap:
+    name: bootstrap on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-22.04 rather than the newest: glibc and webkit from the
+        # oldest release supported, so the AppImage runs on more than the
+        # distribution it was built on.
+        os: [macos-14, windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux webview dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: cargo test
+        working-directory: desktop/src-tauri
+        run: cargo test
+
+      # Runners have no GPU, so nvidia-smi is absent and the CPU index is
+      # selected. That still proves the runtime installs and the server
+      # answers on Windows and Linux — see the known gap below.
+      - name: bootstrap and serve
+        working-directory: desktop/src-tauri
+        run: cargo run -- --bootstrap-only --resources ../.. --data-dir ${{ runner.temp }}/local-img-data
+
+  cuda-index:
+    # Not on every push: cu126 wheels are around 7 GB, which is most of a
+    # runner's free disk and a long download for a check that only fires when
+    # the CUDA path is deliberately being revisited.
+    name: cuda wheels install
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+      # A fake nvidia-smi on PATH, so plan::current() selects the CUDA index
+      # exactly as it would on a machine with a card. What this cannot prove
+      # is that torch then sees a GPU — no runner has one.
+      - name: fake an NVIDIA driver
+        run: |
+          mkdir -p "$HOME/fakebin"
+          printf '#!/bin/sh\necho "GPU 0: NVIDIA GeForce RTX 4090 (UUID: GPU-zz)"\n' \
+            > "$HOME/fakebin/nvidia-smi"
+          chmod +x "$HOME/fakebin/nvidia-smi"
+          echo "$HOME/fakebin" >> "$GITHUB_PATH"
+      - name: free up disk for 7 GB of wheels
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+          df -h /
+      - name: bootstrap with the CUDA index
+        working-directory: desktop/src-tauri
+        run: cargo run -- --bootstrap-only --resources ../.. --data-dir ${{ runner.temp }}/local-img-cuda
