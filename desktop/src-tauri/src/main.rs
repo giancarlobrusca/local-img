@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 mod events;
+mod plan;
 mod proc;
 mod resources;
 
