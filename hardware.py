@@ -84,6 +84,17 @@ def fit(profile: HardwareProfile | None, spec) -> Fit:
     multiplier = CPU_COST_MULTIPLIER if profile.device == "cpu" else 1.0
     need_budget = spec.min_budget_gb * multiplier
 
+    if spec.arch == "flux" and profile.device == "cpu":
+        # flux is loaded with enable_model_cpu_offload(), which offloads onto an
+        # accelerator and raises when there isn't one. No amount of RAM fixes it,
+        # so this is checked before the memory numbers.
+        return Fit(
+            fits=False,
+            reason="needs a GPU; flux models are loaded with CPU offload, "
+                   "which has no accelerator to offload onto on this machine",
+            max_batch=batch,
+            recommended=False,
+        )
     if profile.budget_gb < need_budget:
         return Fit(
             fits=False,
@@ -118,6 +129,17 @@ def fit_all(profile: HardwareProfile | None, specs) -> dict[str, Fit]:
         best = max(winners, key=lambda s: (s.quality_rank, -s.baseline_seconds))
         fits[best.key].recommended = True
     return fits
+
+
+def least_demanding(specs):
+    """The catalog entry closest to usable when nothing fits at all.
+
+    Lowest GPU-visible requirement first, then lowest system RAM, then smallest
+    download. Callers use it as the fallback pick on a machine where fit_all()
+    recommends nothing and nothing fits — offering a model the same payload
+    marks `fits: false` is unavoidable there, so offer the cheapest one.
+    """
+    return min(specs, key=lambda s: (s.min_budget_gb, s.min_ram_gb, s.download_gb))
 
 
 def derive_tier(profile: HardwareProfile, specs) -> str:

@@ -1,6 +1,9 @@
 torch>=2.4
 torchvision
-diffusers>=0.31
+# 0.34 is the first release where enable_model_cpu_offload() resolves the
+# accelerator itself; 0.31-0.33 default that argument to "cuda", which breaks
+# the flux path on Apple Silicon.
+diffusers>=0.34
 transformers>=4.44
 accelerate
 safetensors

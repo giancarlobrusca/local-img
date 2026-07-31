@@ -292,6 +292,19 @@ def run_job(job: Job, req: GenerateRequest):
 
 # ------------------------------------------------------------------ routes ---
 
+def _ready(spec) -> bool:
+    """Whether the weights are cached, defensively.
+
+    is_cached walks the Hugging Face cache; one unreadable directory or one
+    corrupt model_index.json in there must not turn the whole catalog route into
+    a 500 and leave the page blank. Unknown means not ready.
+    """
+    try:
+        return download.is_cached(spec)
+    except (OSError, ValueError):
+        return False
+
+
 def catalog_payload():
     """The catalog as the browser sees it: specs plus fit, estimate, readiness.
 
@@ -313,10 +326,17 @@ def catalog_payload():
             "max_batch": fit.max_batch,
             "recommended": fit.recommended,
             "estimate": asdict(est),
-            "ready": download.is_cached(spec),
+            "ready": _ready(spec),
         })
 
-    picked = next((m["key"] for m in models if m["recommended"]), DEFAULT_MODEL)
+    picked = next((m["key"] for m in models if m["recommended"]), None)
+    if picked is None:
+        # Nothing is recommended: either there is no profile to recommend from
+        # (the hardcoded default is right), or the machine cannot run anything —
+        # in which case offering the default would offer a model this very
+        # payload marks fits: false. Offer the cheapest entry instead.
+        picked = (DEFAULT_MODEL if any(m["fits"] for m in models)
+                  else hardware.least_demanding(MODELS).key)
     return {
         "device": DEVICE,
         "default": picked,
@@ -418,7 +438,16 @@ def run_download(job: Job, spec):
         threading.Thread(target=_watch_download, args=(job, spec, stop), daemon=True).start()
         # download.fetch already retries six times with backoff and resumes from
         # the cache — no retry logic is duplicated here.
-        download.fetch(spec)
+        # fetch() reports a total failure by returning None rather than raising
+        # — its __main__ caller depends on that — so the None has to be checked
+        # here. Without it a failed download still drove the bar to 100%.
+        if download.fetch(spec) is None:
+            job.emit(stage="error", message=(
+                f"{spec.name} was not downloaded — every attempt to fetch the "
+                f"weights failed (the server console has the reason). Trying "
+                f"again resumes from whatever is already in the cache."
+            ))
+            return
         job.emit(stage="download", pct=100, gb_done=spec.download_gb, gb_total=spec.download_gb)
         job.emit(stage="done")
     except Exception as exc:  # surfaced verbatim in the UI

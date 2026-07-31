@@ -323,6 +323,7 @@
       <h2>Here's what you have</h2>
       <div class="oneline" id="wizProfile"></div>
       <div id="wizGroups"></div>
+      <p id="wizNoFit" hidden></p>
       <div class="row">
         <button class="primary" id="wizNext">Continue</button>
       </div>
@@ -348,14 +349,31 @@ let MODELS = {}, busy = false, current = null;
 let PROFILE = null, DEFAULT_KEY = null, SHOW_ALL = false;
 
 async function boot() {
-  await refresh();
-  if (!PROFILE) openWizard();
+  try {
+    await refresh();
+    if (!PROFILE) openWizard();
+  } catch (e) {
+    // /api/models can fail (an unreadable model cache, for one). Say so in the
+    // status bar rather than leaving the page silently blank.
+    setStatus(`could not load the model catalog — ${e.message || e}`, '', true);
+  }
   loadGallery();
 }
 
+// An error body is not guaranteed to be JSON — a parse failure here would
+// replace the real message with a SyntaxError.
+async function errorText(res) {
+  try {
+    const data = await res.json();
+    if (data && data.detail) return data.detail;
+  } catch (e) { /* fall through to the status line */ }
+  return res.statusText || `HTTP ${res.status}`;
+}
+
 async function refresh() {
-  const data = await (await fetch('/api/models')).json();
-  applyData(data);
+  const res = await fetch('/api/models');
+  if (!res.ok) throw new Error(await errorText(res));
+  applyData(await res.json());
 }
 
 function applyData(data) {
@@ -449,7 +467,7 @@ async function scan(skip) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ skip }),
   });
-  if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+  if (!res.ok) throw new Error(await errorText(res));
   const data = await res.json();
   applyData(data);
   return data;
@@ -502,6 +520,14 @@ async function runAnalysis() {
     $('wizAnalyze').textContent = 'Analyze my machine';
   }
   const p = data.profile;
+  if (!p) {
+    // The scan was saved but could not be read back — without this the wizard
+    // would freeze on the intro with no message at all.
+    $('wizError').textContent =
+      'the analysis ran but its profile could not be read back — try again';
+    $('wizError').hidden = false;
+    return;
+  }
   const chip = p.chip || 'unknown chip';
   const cores = p.gpu_cores ? `${p.gpu_cores}-core GPU · ` : '';
   $('wizProfile').textContent =
@@ -509,12 +535,25 @@ async function runAnalysis() {
     `${p.budget_gb.toFixed(1)} GB usable · ${p.free_disk_gb.toFixed(0)} GB free · ${p.tier}` +
     (p.partial ? ' · partial detection' : '');
   $('wizGroups').innerHTML = wizardGroups(data.models);
+
+  const note = $('wizNoFit');
+  const nothingFits = !data.models.some(m => m.fits);
+  note.hidden = !nothingFits;
+  if (nothingFits) {
+    const smallest = [...data.models]
+      .sort((a, b) => a.min_budget_gb - b.min_budget_gb || a.download_gb - b.download_gb)
+      .slice(0, 2).map(m => m.name).join(' and ');
+    note.textContent =
+      `Nothing here fits this machine — ${smallest} are the smallest of the set, ` +
+      `so start there, at 512px, and expect minutes per image.`;
+  }
   showStep('wizResult');
 }
 
 function prepareDownload() {
   const m = MODELS[DEFAULT_KEY];
-  if (!m || m.ready) { closeWizard(); return; }
+  // Never offer to download a model this machine cannot run.
+  if (!m || m.ready || !m.fits) { closeWizard(); return; }
   $('wizDlTitle').textContent = `Get ${m.name}`;
   $('wizDlBody').textContent =
     `${m.download_gb} GB from Hugging Face — a public repo, no token, no quota. ` +
@@ -531,7 +570,7 @@ async function downloadDefault() {
   let job;
   try {
     const res = await fetch(`/api/download/${key}`, { method: 'POST' });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    if (!res.ok) throw new Error(await errorText(res));
     job = (await res.json()).job;
   } catch (e) {
     $('wizDlStatus').innerHTML = `<span class="err">${e.message || e}</span>`;
@@ -647,7 +686,7 @@ async function generate() {
     const res = await fetch('/api/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    if (!res.ok) throw new Error(await errorText(res));
     job = (await res.json()).job;
   } catch (e) {
     setStatus(String(e.message || e), '', true);

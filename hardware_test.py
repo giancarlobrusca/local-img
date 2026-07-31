@@ -106,6 +106,10 @@ MACHINES = [
      SD15 | SDXL, "high", 4, "dreamshaper-xl-turbo"),
     ("CPU, 16 GB RAM", dict(device="cpu", budget=9.6, ram=16.0, cores=None, perf=0.04),
      SD15, "cpu", 1, "dreamshaper-8"),
+    # Enough RAM for flux on paper (26 GB doubled is well under this budget),
+    # but the flux load path needs an accelerator, so flux stays out.
+    ("CPU, 96 GB RAM", dict(device="cpu", budget=57.6, ram=96.0, cores=None, perf=0.04),
+     SD15 | SDXL, "cpu", 4, "dreamshaper-xl-turbo"),
 ]
 
 
@@ -157,6 +161,52 @@ def test_cpu_doubles_the_model_cost():
     check("sdxl does not fit on cpu", not hardware.fit(prof, BY_KEY["sdxl-turbo"]).fits)
     check("cpu reason quotes the doubled cost",
           "19" in hardware.fit(prof, BY_KEY["sdxl-turbo"]).reason)
+
+
+def test_flux_never_fits_without_an_accelerator():
+    """A CPU-only machine cannot run flux at any RAM size.
+
+    pipeline_plan() offloads flux with enable_model_cpu_offload(), which raises
+    "requires accelerator, but not found" when there is no GPU — so "fits" here
+    would promise a 26 GB download that cannot load.
+    """
+    import hardware
+    from models import MODELS
+
+    huge_cpu = _profile(device="cpu", budget=57.6, ram=96.0, cores=None, perf=0.04)
+    flux = [s for s in MODELS if s.arch == "flux"]
+    check("the catalog still has flux entries to check", len(flux) == 2)
+    for spec in flux:
+        result = hardware.fit(huge_cpu, spec)
+        check(f"{spec.key} does not fit a 96 GB CPU machine", not result.fits)
+        check(f"{spec.key} says why", bool(result.reason))
+        check(f"{spec.key} names the missing GPU", "GPU" in result.reason)
+
+    fits = hardware.fit_all(huge_cpu, MODELS)
+    check("no flux model is recommended on a CPU machine",
+          not any(fits[s.key].recommended for s in flux))
+
+    # The same models on the same numbers with a GPU: the rule is about the
+    # device, not about the memory.
+    gpu = _profile(device="cuda", budget=57.6, ram=96.0, cores=None, perf=4.0)
+    check("flux still fits when there is an accelerator",
+          all(hardware.fit(gpu, s).fits for s in flux))
+
+
+def test_nothing_fits_recommends_nothing():
+    import hardware
+    from models import MODELS
+
+    tiny = _profile(device="cpu", budget=1.5, ram=4.0, cores=None, perf=0.04)
+    fits = hardware.fit_all(tiny, MODELS)
+    check("nothing fits a 4 GB CPU machine", not any(f.fits for f in fits.values()))
+    check("nothing is recommended", not any(f.recommended for f in fits.values()))
+    check("every model says why", all(f.reason for f in fits.values()))
+
+    cheapest = hardware.least_demanding(MODELS)
+    check("the least demanding model is dreamshaper-8", cheapest.key == "dreamshaper-8")
+    check("nothing in the catalog asks for less budget",
+          all(m.min_budget_gb >= cheapest.min_budget_gb for m in MODELS))
 
 
 def test_no_profile_and_skipped_profile():
@@ -497,6 +547,53 @@ def test_scan_route_persists_and_populates():
         restore()
 
 
+def test_models_route_survives_an_unreadable_model_cache():
+    """is_cached walks ~/.cache/huggingface, which can raise. A 500 here would
+    leave the page blank: the wizard never opens and the gallery never loads.
+    """
+    import app as app_module
+
+    client, _, restore = _client_with_temp_profile()
+    real_is_cached = app_module.download.is_cached
+    try:
+        def boom(_spec):
+            raise PermissionError("Permission denied: ~/.cache/huggingface/hub")
+
+        app_module.download.is_cached = boom
+        res = client.get("/api/models")
+        check("the catalog route still answers", res.status_code == 200)
+        check("an unreadable cache reads as not ready",
+              all(m["ready"] is False for m in res.json()["models"]))
+    finally:
+        app_module.download.is_cached = real_is_cached
+        restore()
+
+
+def test_models_route_when_nothing_fits():
+    """A CPU machine under ~13 GB fits no model at all. The default must not be
+    the hardcoded DEFAULT_MODEL there — the same payload marks it fits: false,
+    which the wizard would then offer as a 6.9 GB download.
+    """
+    import hardware
+    from models import DEFAULT_MODEL, MODELS
+
+    client, tmp, restore = _client_with_temp_profile()
+    try:
+        hardware.save(_profile(device="cpu", budget=4.8, ram=8.0, cores=None, perf=0.04), tmp)
+        data = client.get("/api/models").json()
+        check("nothing fits an 8 GB CPU machine", not any(m["fits"] for m in data["models"]))
+        check("nothing is recommended", not any(m["recommended"] for m in data["models"]))
+
+        picked = next(m for m in data["models"] if m["key"] == data["default"])
+        cheapest = hardware.least_demanding(MODELS).key
+        check("the default is a model that fits or the lowest-requirement one",
+              picked["fits"] or picked["key"] == cheapest)
+        check("the default is not the hardcoded fallback", data["default"] != DEFAULT_MODEL)
+        check("every model still carries a reason", all(m["reason"] for m in data["models"]))
+    finally:
+        restore()
+
+
 def test_scan_route_can_persist_a_skip():
     client, tmp, restore = _client_with_temp_profile()
     try:
@@ -590,6 +687,91 @@ def test_download_route_rejects_an_unknown_key():
         restore()
 
 
+def _drain(job) -> list:
+    """Every payload the job emitted. Nothing consumes the SSE stream in these
+    tests, so the events sit in the queue waiting to be read."""
+    import queue
+
+    events = []
+    while True:
+        try:
+            events.append(job.events.get_nowait())
+        except queue.Empty:
+            return events
+
+
+def _run_download_job(client, key, wait=100):
+    """POST a download and wait for the job to finish. Returns (job, events)."""
+    import app as app_module
+
+    res = client.post(f"/api/download/{key}")
+    check(f"{key}: 200 for a known key", res.status_code == 200)
+    job_id = res.json().get("job", "")
+    job = app_module.JOBS.get(job_id)
+    check(f"{key}: the job is registered", job is not None)
+    for _ in range(wait):                     # up to 5 s
+        if job.done:
+            break
+        time.sleep(0.05)
+    check(f"{key}: the job finished", job.done)
+    app_module.JOBS.pop(job_id, None)
+    return job, _drain(job)
+
+
+def test_download_route_reports_a_failed_fetch():
+    """download.fetch returns None when it gives up after six attempts — it does
+    not raise. Without an explicit check the job used to emit 100% and `done`,
+    telling the user a failed download had worked.
+    """
+    import app as app_module
+
+    client, _, restore = _client_with_temp_profile()
+    real_fetch = app_module.download.fetch
+    try:
+        app_module.download.fetch = lambda spec, **kw: None
+        _job, events = _run_download_job(client, "dreamshaper-xl-turbo")
+        stages = [e.get("stage") for e in events]
+        check("a failed fetch emits an error", "error" in stages)
+        check("a failed fetch never reports done", "done" not in stages)
+        check("a failed fetch never reaches 100%",
+              not any(e.get("pct") == 100 for e in events))
+        message = next(e["message"] for e in events if e.get("stage") == "error")
+        check("the error names the model", "DreamShaper XL v2 Turbo" in message)
+        check("the error says the weights were not downloaded",
+              "not downloaded" in message)
+        check("the error says a retry resumes", "resumes" in message)
+    finally:
+        app_module.download.fetch = real_fetch
+        restore()
+
+
+def test_download_route_reports_a_disk_shortfall():
+    """The refusal has to reach the browser, not just disk_shortfall()'s caller."""
+    import types
+    import app as app_module
+
+    client, _, restore = _client_with_temp_profile()
+    real_fetch = app_module.download.fetch
+    real_disk_usage = app_module.shutil.disk_usage
+    calls: list = []
+    try:
+        app_module.download.fetch = lambda spec, **kw: calls.append(spec.key)
+        app_module.shutil.disk_usage = lambda _path: types.SimpleNamespace(
+            total=500_000_000_000, used=499_000_000_000, free=1_000_000_000)
+        _job, events = _run_download_job(client, "dreamshaper-xl-turbo")
+        stages = [e.get("stage") for e in events]
+        check("a disk shortfall emits an error", "error" in stages)
+        check("a disk shortfall never reports done", "done" not in stages)
+        message = next(e["message"] for e in events if e.get("stage") == "error")
+        check("the error names the shortfall", "not enough disk" in message)
+        check("nothing was transferred", calls == [])
+    finally:
+        app_module.shutil.disk_usage = real_disk_usage
+        app_module.download.fetch = real_fetch
+        restore()
+    check("disk_usage was restored", app_module.shutil.disk_usage is real_disk_usage)
+
+
 def test_download_route_starts_a_job():
     import app as app_module
 
@@ -599,7 +781,13 @@ def test_download_route_starts_a_job():
     calls: list = []
     job_id = ""
     try:
-        app_module.download.fetch = lambda spec, **kw: calls.append(spec.key)
+        # fetch returns the snapshot folder on success — a stub returning None
+        # (list.append does) would exercise the failure path instead.
+        def fake_fetch(spec, **_kw):
+            calls.append(spec.key)
+            return ROOT / f"{PREFIX}snapshot"
+
+        app_module.download.fetch = fake_fetch
         res = client.post("/api/download/dreamshaper-xl-turbo")
         check("200 for a known key", res.status_code == 200)
         job_id = res.json().get("job", "")
@@ -613,6 +801,9 @@ def test_download_route_starts_a_job():
             time.sleep(0.05)
         check("the job finished", job.done)
         check("fetch was called once", calls == ["dreamshaper-xl-turbo"])
+        stages = [e.get("stage") for e in _drain(job)]
+        check("a successful fetch reports done", "done" in stages)
+        check("a successful fetch reports no error", "error" not in stages)
     finally:
         app_module.download.fetch = real_fetch
         app_module.JOBS.pop(job_id, None)
