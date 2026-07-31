@@ -156,12 +156,89 @@
     color: var(--muted); cursor: pointer;
   }
   .stage .delete:hover { border-color: var(--danger); color: var(--danger); }
+
+  /* ------------------------------------------------------------- hardware -- */
+  .hwline {
+    display: block; width: 100%; text-align: left; margin-top: -8px;
+    background: none; border: 0; padding: 0; cursor: pointer;
+    font: inherit; font-size: 11px; color: var(--muted);
+  }
+  .hwline:hover { color: var(--text); }
+  .hwpanel {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 11px; font-size: 12px; color: var(--muted);
+  }
+  .hwpanel dl { margin: 0 0 10px; display: grid; grid-template-columns: auto 1fr;
+                gap: 3px 12px; }
+  .hwpanel dt { color: var(--muted); }
+  .hwpanel dd { margin: 0; color: var(--text); }
+  .banner {
+    background: var(--accent-dim); border: 1px solid #3b4383; color: #b9c2ff;
+    border-radius: var(--radius); padding: 10px 11px; font-size: 12px; line-height: 1.45;
+  }
+  .banner button {
+    margin-top: 8px; background: none; border: 1px solid #3b4383; border-radius: 6px;
+    color: #b9c2ff; font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer;
+  }
+  .banner button:hover { border-color: var(--accent); color: var(--text); }
+
+  /* --------------------------------------------------------------- wizard -- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 20; background: rgba(12,13,16,.86);
+    backdrop-filter: blur(6px); display: flex; align-items: center;
+    justify-content: center; padding: 24px; overflow-y: auto;
+  }
+  .overlay[hidden] { display: none; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px; width: 100%; max-width: 620px;
+  }
+  .card h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; }
+  .card p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .card .row { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
+  .card .row .primary { width: auto; flex: 1; }
+  .link {
+    background: none; border: 0; padding: 0; color: var(--muted);
+    font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer;
+  }
+  .link:hover { color: var(--text); }
+  .oneline {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px 12px; margin-bottom: 16px; font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, monospace; color: var(--text);
+  }
+  .group { margin-bottom: 14px; }
+  .group h3 {
+    margin: 0 0 7px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); font-weight: 500;
+  }
+  .row-model {
+    display: flex; gap: 10px; align-items: baseline; padding: 5px 0;
+    border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .row-model:last-child { border-bottom: 0; }
+  .row-model .why { color: var(--muted); font-size: 12px; }
+  .row-model .size { margin-left: auto; color: var(--muted); font-size: 12px;
+                     white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .group.blocked .row-model { opacity: .5; }
+  .ready { color: var(--accent); font-size: 11px; text-transform: uppercase;
+           letter-spacing: .05em; }
+  .wizbar { height: 6px; background: var(--panel-2); border-radius: 3px;
+            overflow: hidden; margin: 16px 0 8px; }
+  .wizbar > i { display: block; height: 100%; width: 0; background: var(--accent);
+                transition: width .25s ease; }
 </style>
 </head>
 <body>
 
 <aside>
   <h1><span class="dot"></span> local-img <small id="device">…</small></h1>
+  <button class="hwline" id="hwline" hidden></button>
+  <div class="hwpanel" id="hwpanel" hidden></div>
+  <div class="banner" id="hwbanner" hidden>
+    Model filtering is off — nothing is known about this machine yet.
+    <button id="bannerScan">Analyze my machine</button>
+  </div>
 
   <div>
     <label for="prompt">Prompt</label>
@@ -222,30 +299,254 @@
   <div class="gallery" id="gallery"><span class="placeholder">No images yet</span></div>
 </main>
 
+<div class="overlay" id="wizard" hidden>
+  <div class="card">
+
+    <div id="wizIntro">
+      <h2>Before we start, let's see what your machine can do</h2>
+      <p>This reads your chip, how much memory the GPU may actually use, and how
+         much disk is free. Nothing leaves this computer — there is no network
+         call in the analysis, and the result is saved locally in
+         <code>.local-img/profile.json</code>. It takes about a second.</p>
+      <p>The point is to stop offering you models that will not fit, and to stop
+         hiding ones that will.</p>
+      <div class="row">
+        <button class="primary" id="wizAnalyze">Analyze my machine</button>
+        <button class="link" id="wizSkip">Skip — show me everything</button>
+      </div>
+    </div>
+
+    <div id="wizResult" hidden>
+      <h2>Here's what you have</h2>
+      <div class="oneline" id="wizProfile"></div>
+      <div id="wizGroups"></div>
+      <div class="row">
+        <button class="primary" id="wizNext">Continue</button>
+      </div>
+    </div>
+
+    <div id="wizDownload" hidden>
+      <h2 id="wizDlTitle">Get the weights</h2>
+      <p id="wizDlBody"></p>
+      <div class="wizbar"><i id="wizDlFill"></i></div>
+      <p class="mono" id="wizDlStatus"></p>
+      <div class="row">
+        <button class="primary" id="wizDlGo">Download</button>
+        <button class="link" id="wizDlSkip">Skip — download it on first use</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 let MODELS = {}, busy = false, current = null;
+let PROFILE = null, DEFAULT_KEY = null, SHOW_ALL = false;
 
 async function boot() {
-  const data = await (await fetch('/api/models')).json();
-  $('device').textContent = { mps: 'Metal / MPS', cuda: 'CUDA', cpu: 'CPU — very slow' }[data.device] || data.device;
-  MODELS = Object.fromEntries(data.models.map(m => [m.key, m]));
-  $('model').innerHTML = data.models
-    .map(m => `<option value="${m.key}">${m.name} — ${m.download_gb} GB</option>`).join('');
-  $('model').value = data.default;
-  applyModel();
+  await refresh();
+  if (!PROFILE) openWizard();
   loadGallery();
+}
+
+async function refresh() {
+  const data = await (await fetch('/api/models')).json();
+  applyData(data);
+}
+
+function applyData(data) {
+  $('device').textContent =
+    { mps: 'Metal / MPS', cuda: 'CUDA', cpu: 'CPU — very slow' }[data.device] || data.device;
+  PROFILE = data.profile;
+  DEFAULT_KEY = data.default;
+  MODELS = Object.fromEntries(data.models.map(m => [m.key, m]));
+  renderModels(data.models);
+  renderHardware();
+}
+
+const GROUPS = [
+  ['Recommended', m => m.recommended],
+  ['Also works', m => !m.recommended && m.fits],
+  ["Won't fit on this machine", m => !m.fits],
+];
+
+function renderModels(models) {
+  const previous = $('model').value;
+  const sel = $('model');
+  sel.innerHTML = GROUPS.map(([title, match]) => {
+    const rows = models.filter(match);
+    if (!rows.length) return '';
+    const blocked = title.startsWith("Won't");
+    return `<optgroup label="${title}">` + rows.map(m =>
+      `<option value="${m.key}" ${blocked && !SHOW_ALL ? 'disabled' : ''}>` +
+      `${m.name} — ${m.download_gb} GB${blocked ? ' — ' + m.reason : ''}</option>`
+    ).join('') + '</optgroup>';
+  }).join('');
+
+  const wanted = MODELS[previous] && (MODELS[previous].fits || SHOW_ALL)
+    ? previous : DEFAULT_KEY;
+  sel.value = wanted;
+  applyModel();
 }
 
 function applyModel() {
   const m = MODELS[$('model').value];
-  $('blurb').textContent = m.blurb;
-  $('tags').innerHTML = m.tags.map(t => `<span class="tag ${t}">${t}</span>`).join('');
+  if (!m) return;
+  $('blurb').textContent = `${m.blurb} ${m.estimate.label} per image.`;
+  const tags = m.recommended ? ['recommended', ...m.tags] : m.tags;
+  $('tags').innerHTML = tags.map(t => `<span class="tag ${t}">${t}</span>`).join('');
   $('steps').value = m.steps;
   $('guidance').value = m.guidance;
   $('width').value = m.width;
   $('height').value = m.height;
+  $('batch').max = m.max_batch;
+  if (+$('batch').value > m.max_batch) $('batch').value = m.max_batch;
   $('negwrap').style.display = m.supports_negative ? '' : 'none';
+}
+
+function renderHardware() {
+  const line = $('hwline'), panel = $('hwpanel'), banner = $('hwbanner');
+  if (!PROFILE || PROFILE.skipped) {
+    line.hidden = true;
+    panel.hidden = true;
+    banner.hidden = !PROFILE;          // no profile at all -> the wizard covers it
+    return;
+  }
+  banner.hidden = true;
+  line.hidden = false;
+  const chip = PROFILE.chip.replace(/^Apple /, '');
+  line.textContent = `${chip} · ${PROFILE.total_ram_gb.toFixed(0)} GB · ${PROFILE.tier}` +
+                     (PROFILE.partial ? ' · partial detection' : '');
+  panel.innerHTML =
+    '<dl>' +
+    row('Chip', PROFILE.chip) +
+    (PROFILE.gpu_cores ? row('GPU', `${PROFILE.gpu_cores} cores`) : '') +
+    row('Memory', `${PROFILE.total_ram_gb.toFixed(0)} GB, ${PROFILE.budget_gb.toFixed(1)} GB usable`) +
+    row('Free disk', `${PROFILE.free_disk_gb.toFixed(0)} GB`) +
+    row('Tier', PROFILE.tier) +
+    row('Speed vs reference', `${PROFILE.perf_factor}×`) +
+    row('Detected', PROFILE.detected_at.replace('T', ' ')) +
+    '</dl>' +
+    '<label style="text-transform:none;letter-spacing:0;margin:0 0 10px">' +
+    `<input type="checkbox" id="showAll" ${SHOW_ALL ? 'checked' : ''}> ` +
+    'Show models that will not fit</label>' +
+    '<button class="link" id="rescan">Re-analyze this machine</button>';
+
+  $('showAll').onchange = e => { SHOW_ALL = e.target.checked; renderModels(Object.values(MODELS)); };
+  $('rescan').onclick = () => scan(false);
+}
+
+function row(term, value) {
+  return `<dt>${term}</dt><dd>${value}</dd>`;
+}
+
+async function scan(skip) {
+  const data = await (await fetch('/api/hardware/scan', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skip }),
+  })).json();
+  applyData(data);
+  return data;
+}
+
+function openWizard() {
+  $('wizard').hidden = false;
+  showStep('wizIntro');
+}
+
+function showStep(id) {
+  for (const step of ['wizIntro', 'wizResult', 'wizDownload']) {
+    $(step).hidden = step !== id;
+  }
+}
+
+function closeWizard() {
+  $('wizard').hidden = true;
+}
+
+function wizardGroups(models) {
+  return GROUPS.map(([title, match]) => {
+    const rows = models.filter(match);
+    if (!rows.length) return '';
+    const blocked = title.startsWith("Won't");
+    return `<div class="group ${blocked ? 'blocked' : ''}"><h3>${title}</h3>` +
+      rows.map(m =>
+        `<div class="row-model">
+           <span>${m.name}</span>
+           ${m.ready ? '<span class="ready">ready</span>' : ''}
+           <span class="why">${blocked ? m.reason : m.estimate.label}</span>
+           <span class="size">${m.download_gb} GB</span>
+         </div>`).join('') + '</div>';
+  }).join('');
+}
+
+async function runAnalysis() {
+  $('wizAnalyze').disabled = true;
+  $('wizAnalyze').textContent = 'Analyzing…';
+  let data;
+  try {
+    data = await scan(false);
+  } finally {
+    $('wizAnalyze').disabled = false;
+    $('wizAnalyze').textContent = 'Analyze my machine';
+  }
+  const p = data.profile;
+  const chip = p.chip || 'unknown chip';
+  const cores = p.gpu_cores ? `${p.gpu_cores}-core GPU · ` : '';
+  $('wizProfile').textContent =
+    `${chip} · ${cores}${p.total_ram_gb.toFixed(0)} GB · ` +
+    `${p.budget_gb.toFixed(1)} GB usable · ${p.free_disk_gb.toFixed(0)} GB free · ${p.tier}` +
+    (p.partial ? ' · partial detection' : '');
+  $('wizGroups').innerHTML = wizardGroups(data.models);
+  showStep('wizResult');
+}
+
+function prepareDownload() {
+  const m = MODELS[DEFAULT_KEY];
+  if (!m || m.ready) { closeWizard(); return; }
+  $('wizDlTitle').textContent = `Get ${m.name}`;
+  $('wizDlBody').textContent =
+    `${m.download_gb} GB from Hugging Face — a public repo, no token, no quota. ` +
+    `A dropped transfer resumes from the cache rather than restarting.`;
+  $('wizDlGo').textContent = `Download ${m.name} (~${m.download_gb} GB)`;
+  $('wizDlFill').style.width = '0%';
+  $('wizDlStatus').textContent = '';
+  showStep('wizDownload');
+}
+
+async function downloadDefault() {
+  const key = DEFAULT_KEY;
+  $('wizDlGo').disabled = true;
+  let job;
+  try {
+    const res = await fetch(`/api/download/${key}`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    job = (await res.json()).job;
+  } catch (e) {
+    $('wizDlStatus').innerHTML = `<span class="err">${e.message || e}</span>`;
+    $('wizDlGo').disabled = false;
+    return;
+  }
+
+  const es = new EventSource(`/api/stream/${job}`);
+  es.onmessage = async ev => {
+    const d = JSON.parse(ev.data);
+    if (d.stage === 'download') {
+      $('wizDlFill').style.width = d.pct + '%';
+      $('wizDlStatus').textContent = `${d.gb_done} / ${d.gb_total} GB`;
+    } else if (d.stage === 'error') {
+      $('wizDlStatus').innerHTML = `<span class="err">${d.message}</span>`;
+      $('wizDlGo').disabled = false;
+      es.close();
+    } else if (d.stage === 'done') {
+      $('wizDlStatus').textContent = 'done';
+      es.close();
+      await refresh();
+      closeWizard();
+    }
+  };
+  es.onerror = () => { es.close(); $('wizDlGo').disabled = false; };
 }
 
 function setStatus(text, right = '', isError = false) {
@@ -378,6 +679,13 @@ function finish() {
 
 $('model').onchange = applyModel;
 $('go').onclick = generate;
+$('hwline').onclick = () => { $('hwpanel').hidden = !$('hwpanel').hidden; };
+$('bannerScan').onclick = () => scan(false);
+$('wizAnalyze').onclick = runAnalysis;
+$('wizSkip').onclick = async () => { await scan(true); closeWizard(); };
+$('wizNext').onclick = prepareDownload;
+$('wizDlGo').onclick = downloadDefault;
+$('wizDlSkip').onclick = closeWizard;
 $('del').onclick = () => { if (current) removeImage(current); };
 $('prompt').addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate();
