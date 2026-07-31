@@ -1,7 +1,8 @@
 """Local text-to-image server. Runs on Apple Metal (MPS), NVIDIA (CUDA), or CPU.
 
 Runs entirely offline after the model weights are cached. Start with ./run.sh
-then open http://127.0.0.1:7788
+then open http://127.0.0.1:7788 — or set LOCAL_IMG_PORT, which is what the
+desktop shell does after asking the OS for a free one.
 
 Bound to localhost on purpose. This serves an unauthenticated, unfiltered
 generation endpoint with a shared gallery and a delete route — it is a
@@ -655,10 +656,83 @@ def delete_output(name: str):
 app.mount("/web", StaticFiles(directory=ROOT / "web"), name="web")
 
 
+# ------------------------------------------------------------- lifecycle ---
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process with this PID exists.
+
+    Zero and negatives are dead by definition here: os.kill(0, 0) signals our
+    whole process group and os.kill(-1, 0) signals every process we may signal,
+    so both would answer "alive" and keep an orphan running forever.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            # A PID whose process has exited but whose handle is still open
+            # reports its exit code, not STILL_ACTIVE — which is exactly the
+            # case a bare OpenProcess success would get wrong.
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return bool(ok) and code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True     # it exists; it just isn't ours to signal
+    return True
+
+
+def watch_parent(pid: int, interval: float = 2.0):
+    """Exit when the process that started us disappears.
+
+    Only reachable in app mode. If the shell is killed abruptly nothing on its
+    side gets to run, and without this the child keeps a 7 GB pipeline resident
+    with no window attached to it.
+
+    os._exit rather than a graceful shutdown: there is no longer anyone to
+    report to, and a clean uvicorn stop would wait out an in-flight render that
+    can take four minutes and whose PNG will never be written anyway.
+    """
+    while pid_alive(pid):
+        time.sleep(interval)
+    os._exit(0)
+
+
+def chosen_port() -> int:
+    """The port to bind. 7788 unless the shell picked one, and 7788 again if
+    what it picked cannot be a port — a blank window is a worse outcome than
+    an occupied default."""
+    raw = os.environ.get("LOCAL_IMG_PORT", "").strip()
+    if not raw:
+        return 7788
+    try:
+        port = int(raw)
+    except ValueError:
+        return 7788
+    return port if 1 <= port <= 65535 else 7788
+
+
 if __name__ == "__main__":
+    parent = os.environ.get("LOCAL_IMG_PARENT_PID", "").strip()
+    if parent.isdigit():
+        threading.Thread(target=watch_parent, args=(int(parent),), daemon=True).start()
+
+    port = chosen_port()
     print(f"\n  local-img — device: {DEVICE}, dtype: {DTYPE}")
     if DEVICE == "cpu":
         print("  WARNING: no GPU detected. Expect many minutes per image, and")
         print("           ~14 GB of RAM for the SDXL models. Try dreamshaper-8.")
-    print("  open http://127.0.0.1:7788\n")
-    uvicorn.run(app, host="127.0.0.1", port=7788, log_level="warning")
+    print(f"  open http://127.0.0.1:{port}\n")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
