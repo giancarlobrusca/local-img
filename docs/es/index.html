@@ -19,11 +19,11 @@
 
   <!-- ------------------------------------------------------------ hero -->
   <section class="hero">
-    <div class="eyebrow"><b>local-img</b> · macOS · Windows · Linux · MIT<span class="langs"><a href="../">EN</a> · ES</span></div>
+    <div class="eyebrow"><span><b>local-img</b> · macOS · Windows · Linux · MIT</span><span class="langs"><a href="../">EN</a> · ES</span></div>
     <div class="stack">
       <h1>Generá imágenes sin que salgan nunca de tu computadora.</h1>
       <p class="lead">
-        Escribís un prompt, sale un PNG. Corre en <strong>tu propia placa de video</strong>,
+        Escribís un prompt, sale un PNG. Todo corre en <strong>tu propia placa de video</strong>,
         así que nada de lo que escribís y nada de lo que hacés se sube, se registra
         ni lo revisa nadie. Después de la primera descarga funciona con el wi-fi apagado.
       </p>
@@ -66,8 +66,9 @@
     </div>
 
     <p class="unsigned">
-      Los builds no están firmados — los certificados cuestan plata todos los años
-      y esto es gratis — así que tu computadora te va a avisar una vez cuando lo abras.
+      Los builds no están firmados — los certificados de firma cuestan plata todos
+      los años y esto es gratis — así que tu computadora te va a avisar una vez cuando
+      la abras.
       <a href="#security">Acá está exactamente qué dice y qué hay que tocar.</a>
     </p>
   </section>
@@ -88,19 +89,20 @@
 
   <!-- ----------------------------------------------------- first launch -->
   <section>
-    <div class="label">La primera vez que lo abrís</div>
+    <div class="label">La primera vez que la abrís</div>
     <div class="col stack" style="margin-bottom: 30px;">
-      <h2>Se instala solo. No tenés que instalar nada más.</h2>
+      <h2>Se configura sola. No tenés que instalar nada más.</h2>
       <p class="lead">
         La mayoría de las herramientas como esta te piden instalar Python, después un
-        gestor de paquetes, después una lista de librerías. Esta trae los suyos y los
-        deja en una carpeta aparte, así después puede limpiar sin dejar nada dando vueltas.
+        gestor de paquetes, después una lista de librerías. Esta trae todo eso adentro,
+        en una carpeta aparte, así el día que la borres se va entera y no queda nada
+        dando vueltas.
       </p>
     </div>
     <ol class="steps">
       <li>
         <div>
-          <h3>Descarga su motor</h3>
+          <h3>La app descarga su motor</h3>
           <p>
             Alrededor de 1 GB en una Mac, o hasta 7 GB en una PC con placa NVIDIA,
             donde las librerías gráficas pesan mucho más. Pasa una sola vez. Vas a ver
@@ -115,16 +117,17 @@
             Lee tu chip, cuánta memoria te va a entregar realmente la placa de video y
             cuánto disco libre te queda — y después te muestra solo los modelos que van
             a andar de verdad, con el resto listado junto al número que los bloquea.
-            Nada de tu máquina sale de tu máquina.
+            Nada de eso sale de tu máquina.
           </p>
         </div>
       </li>
       <li>
         <div>
-          <h3>Recomienda un modelo, y pregunta antes de bajarlo</h3>
+          <h3>Recomienda un modelo y pregunta antes de bajarlo</h3>
           <p>
-            Los modelos pesan entre 2 GB y 34 GB, así que te dice cuánto ocupa y espera.
-            De ahí en adelante ya estás generando imágenes, y la app funciona sin conexión.
+            Los modelos pesan entre 2 GB y 34 GB, así que te dice cuánto ocupa el que te
+            recomienda, y espera. De ahí en adelante ya estás generando imágenes, y la app
+            funciona sin conexión.
           </p>
         </div>
       </li>
@@ -206,20 +209,22 @@
     <div class="prompts">
       <div class="prompt">
         <h3>macOS</h3>
-        <p class="quote">«local-img no se puede abrir porque no se puede verificar el desarrollador.»</p>
+        <p class="quote">«local-img no se puede abrir porque no se puede verificar al desarrollador».</p>
         <p>
-          Botón derecho sobre la app en la carpeta Aplicaciones, <kbd>Open</kbd> —«Abrir»,
-          si tenés el sistema en español— y <kbd>Open</kbd> otra vez en el cartel que
-          aparece. Con doble clic no alcanza la primera vez: tiene que ser con botón derecho.
+          Hacé clic derecho sobre la app en la carpeta Aplicaciones, elegí
+          <kbd lang="en">Open</kbd> («Abrir», si tenés el sistema en español) y después
+          <kbd lang="en">Open</kbd> otra vez en el cartel que aparece. Con doble clic no
+          alcanza la primera vez: tiene que ser con clic derecho.
         </p>
       </div>
       <div class="prompt">
         <h3>Windows</h3>
-        <p class="quote">«Windows protegió tu PC.»</p>
+        <p class="quote">«Windows protegió su PC».</p>
         <p>
-          Hacé clic en <kbd>More info</kbd> —«Más información»—, que despliega un botón,
-          y después en <kbd>Run anyway</kbd>. El botón no está a la vista hasta ese
-          primer clic, y es justo la parte que casi todos se pierden.
+          Hacé clic en <kbd lang="en">More info</kbd> («Más información»), que despliega
+          un botón, y después en <kbd lang="en">Run anyway</kbd> («Ejecutar de todas
+          formas»). El botón no está a la vista hasta ese primer clic, y es justo la
+          parte que casi todos se pierden.
         </p>
       </div>
     </div>
@@ -227,11 +232,11 @@
 
   <!-- ----------------------------------------------------------- source -->
   <section>
-    <div class="label">O buildealo vos mismo</div>
+    <div class="label">O instalalo desde el código</div>
     <div class="col stack" style="margin-bottom: 26px;">
       <h2>Acá no hay nada escondido.</h2>
       <p class="lead">
-        Si preferís no pasar por un aviso de seguridad, o querés leer primero lo que vas
+        Si preferís no pasar por el aviso de seguridad, o querés leer primero lo que vas
         a correr, todo el proyecto está en GitHub y se instala desde el código en
         cualquier máquina que tenga Python 3.11 o 3.12.
       </p>

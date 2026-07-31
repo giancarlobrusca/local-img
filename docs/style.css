@@ -88,6 +88,9 @@
 
   /* ------------------------------------------------------------- hero -- */
   .hero { padding-top: clamp(48px, 9vw, 96px); padding-bottom: clamp(40px, 6vw, 64px); }
+  /* Exactly two children, both spans: the product line and .langs. A bare text
+     run here would become an anonymous flex item, lose its leading space, and
+     take column-gap instead — an asymmetric hole after "local-img". */
   .eyebrow {
     font-family: var(--mono); font-size: 12px; color: var(--muted);
     letter-spacing: .04em; margin-bottom: 22px;
