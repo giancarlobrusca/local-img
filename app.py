@@ -6,6 +6,11 @@ then open http://127.0.0.1:7788
 Bound to localhost on purpose. This serves an unauthenticated, unfiltered
 generation endpoint with a shared gallery and a delete route — it is a
 single-user tool, not something to expose to a network.
+
+Set LOCAL_IMG_TOKEN and that stops being true for the browser: every route then
+requires a session cookie that only /?token=… can set, and rejects a foreign
+Origin. The desktop shell sets it because an installed app shares the browser
+with every other page the user has open. Unset, nothing below changes.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import urlparse
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -27,7 +33,9 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import torch
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -59,7 +67,56 @@ DEVICE = _pick_device()
 # gets fp32 — twice the memory (~14 GB for SDXL) and still minutes per image.
 DTYPE = torch.float32 if DEVICE == "cpu" else torch.float16
 
+# The shell generates a fresh one per launch and passes it by environment.
+# Empty means the repo flow: no cookie, no Origin check, nothing gated.
+TOKEN = os.environ.get("LOCAL_IMG_TOKEN", "").strip()
+COOKIE_NAME = "local_img_session"
+# /api/health is what the shell polls to learn the child is up — before the
+# window has navigated anywhere, and therefore before any cookie exists.
+OPEN_PATHS = frozenset({"/api/health"})
+
 app = FastAPI(title="local-img")
+
+
+def origin_allowed(origin: str | None, host: str | None) -> bool:
+    """Whether a browser-supplied Origin may act on this server.
+
+    Same-origin requests either omit Origin entirely (top-level navigations,
+    curl, the shell) or send exactly this server's scheme, host and port.
+    Anything else — another page on another port, a public site, the literal
+    `null` a sandboxed iframe sends — is a cross-site caller.
+
+    Comparing against the request's own Host rather than a hardcoded
+    127.0.0.1 allowlist is what makes this both correct under an arbitrary
+    LOCAL_IMG_PORT and testable through TestClient, whose host is `testserver`.
+    """
+    if not origin:
+        return True
+    parsed = urlparse(origin)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    return parsed.netloc == (host or "")
+
+
+@app.middleware("http")
+async def require_session(request, call_next):
+    """The whole gate, in one place. Inert when TOKEN is empty.
+
+    A malicious page can neither read an HttpOnly cookie nor persuade the
+    browser to send a SameSite=Strict one cross-site, so the cookie alone would
+    do. The Origin check is the second lock: it costs one comparison and it
+    still holds if a future browser relaxes SameSite defaults.
+    """
+    if not TOKEN:
+        return await call_next(request)
+    if request.url.path in OPEN_PATHS:
+        return await call_next(request)
+    if not origin_allowed(request.headers.get("origin"), request.headers.get("host")):
+        return PlainTextResponse("forbidden origin", status_code=403)
+    supplied = request.cookies.get(COOKIE_NAME) or request.query_params.get("token")
+    if supplied != TOKEN:
+        return PlainTextResponse("missing session", status_code=403)
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------- pipeline ---
@@ -178,8 +235,12 @@ CACHE = PipelineCache()
 # -------------------------------------------------------------------- jobs ---
 
 class Job:
-    def __init__(self, job_id: str):
+    def __init__(self, job_id: str, kind: str):
         self.id = job_id
+        # "generate" or "download" — the shell asks before closing on the
+        # first and not the second, because a dropped download resumes and a
+        # dropped four-minute flux render is simply lost.
+        self.kind = kind
         self.events: queue.Queue = queue.Queue()
         self.done = False
 
@@ -358,6 +419,27 @@ def list_models():
     return catalog_payload()
 
 
+@app.get("/api/health")
+def health():
+    """Proof the child is up. Deliberately says nothing a caller could use."""
+    return {"ok": True, "device": DEVICE}
+
+
+@app.get("/api/busy")
+def busy():
+    """What is in flight, so the shell can ask before it kills the process.
+
+    The image is written only when the render finishes, so closing four minutes
+    into a flux job loses it entirely. A download is a different matter — it
+    resumes from the Hugging Face cache — hence two fields, not one.
+    """
+    live = [j for j in JOBS.values() if not j.done]
+    return {
+        "generating": any(j.kind == "generate" for j in live),
+        "downloading": any(j.kind == "download" for j in live),
+    }
+
+
 @app.post("/api/hardware/scan")
 def scan_hardware(req: ScanRequest = ScanRequest()):
     """Measure the machine and persist the result — or persist a declined scan.
@@ -377,7 +459,7 @@ def generate(req: GenerateRequest):
     if not req.prompt.strip():
         raise HTTPException(400, "prompt is empty")
     job_id = f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
-    job = Job(job_id)
+    job = Job(job_id, "generate")
     JOBS[job_id] = job
     threading.Thread(target=run_job, args=(job, req), daemon=True).start()
     return {"job": job_id}
@@ -465,7 +547,7 @@ def start_download(key: str):
     if key not in BY_KEY:
         raise HTTPException(400, f"unknown model {key}")
     job_id = f"{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
-    job = Job(job_id)
+    job = Job(job_id, "download")
     JOBS[job_id] = job
     threading.Thread(target=run_download, args=(job, BY_KEY[key]), daemon=True).start()
     return {"job": job_id}
@@ -510,12 +592,24 @@ def gallery(limit: int = 40):
 
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+def index(token: str | None = None, firstrun: int = 0):
+    """The page — or, when handed a token, the redirect that sets the cookie.
+
+    The token reaches the server exactly once, in a URL the shell navigates to
+    itself; from then on the browser carries a cookie no other page can read.
+    An invalid token never gets here: the middleware rejected it already.
+    """
+    if TOKEN and token is not None:
+        response = RedirectResponse("/?firstrun=1" if firstrun else "/", status_code=303)
+        response.set_cookie(
+            COOKIE_NAME, TOKEN, httponly=True, samesite="strict", path="/"
+        )
+        return response
     # encoding="utf-8" is not optional. Without it Python decodes with the
     # platform's locale encoding — cp1252 on a Windows machine — and every
     # typographic character in the page (·, —) reaches the browser as mojibake,
     # or the route raises outright on a strictly ASCII locale.
-    return (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse((ROOT / "web" / "index.html").read_text(encoding="utf-8"))
 
 
 @app.get("/outputs/{name}")

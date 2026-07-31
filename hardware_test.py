@@ -524,7 +524,10 @@ def test_page_is_read_as_utf8_whatever_the_locale():
     previous = locale.setlocale(locale.LC_CTYPE)
     try:
         locale.setlocale(locale.LC_CTYPE, "C")
-        page = app_module.index()
+        # index() now returns an HTMLResponse (Task 2 gave the route a second,
+        # cookie-setting return path that must return a real Response), not a
+        # plain string — unwrap its body to get back the page text.
+        page = app_module.index().body.decode("utf-8")
     except UnicodeDecodeError:
         page = ""
         check("the page is served under an ASCII locale", False)
