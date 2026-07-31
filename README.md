@@ -19,7 +19,7 @@ parameters in the middle, and the local history along the bottom](docs/screensho
 |---|---|
 | Python | 3.11 or 3.12 (PyTorch has no 3.13/3.14 wheels) |
 | GPU | Apple Silicon (Metal/MPS) or NVIDIA (CUDA) |
-| Memory | 8 GB gets SD 1.5; 16 GB gets every SDXL model; 36 GB+ gets the flux tier |
+| Memory | A 4 GB GPU or 8 GB of unified memory gets SD 1.5; 16 GB gets every SDXL model; 36 GB+ gets the flux tier |
 | Disk | ~2-4 GB per SD 1.5 model, ~7 GB per SDXL model, 26-34 GB per flux model, plus ~2.5 GB of Python deps |
 
 The backend is detected automatically — CUDA, then MPS, then CPU — and shown next
@@ -65,7 +65,7 @@ cache, so rerunning never restarts from zero.
 
 ```bash
 ./download.sh juggernaut-xl-v9  # a specific model
-./download.sh all               # every model (~30 GB)
+./download.sh all               # every model (~104 GB)
 ./download.sh prune             # drop cached files no pipeline loads
 ```
 
@@ -79,8 +79,9 @@ The flux tier uses ungated Apache-2.0 derivatives instead.
 
 | Model | Arch | Disk | Needs | Baseline | Notes |
 |---|---|---|---|---|---|
-| LCM DreamShaper v7 | SD 1.5 | 4.3 GB | 4 GB GPU / 8 GB RAM | ~4 s | Latent-consistency distill, 4-8 steps. The 8 GB machine's model. MIT. |
-| DreamShaper 8 | SD 1.5 | 2.1 GB | 4 GB GPU / 8 GB RAM | **~18 s** *(measured)* | Smallest download. Broadest concept coverage, huge LoRA ecosystem. |
+| LCM DreamShaper v7 | SD 1.5 | 4.3 GB | 3.5 GB GPU / 8 GB RAM | ~4 s | Latent-consistency distill, 4-8 steps. The fastest route to 768px on a small card. MIT. |
+| DreamShaper 8 | SD 1.5 | 2.1 GB | 3 GB GPU / 8 GB RAM | **~18 s** *(measured)* | Smallest download. Broadest concept coverage, huge LoRA ecosystem. |
+| SD Turbo | SD 2.1 | 2.6 GB | 3 GB GPU / 8 GB RAM | ~2 s | 1-4 steps at 512px, the smallest footprint here. Base trained on filtered data. |
 | SDXL Turbo | SDXL | 6.9 GB | 9.5 GB GPU / 16 GB RAM | ~5 s | 3-step previews at 512px. Ignores negative prompts and CFG by design. |
 | **DreamShaper XL v2 Turbo** | SDXL | 6.9 GB | 9.5 GB GPU / 16 GB RAM | **~40 s** *(measured)* | Best quality-per-second. SDXL at 1024px in 7 steps. |
 | Playground v2.5 | SDXL | 7.0 GB | 9.5 GB GPU / 16 GB RAM | ~200 s | Trained from scratch for aesthetics. Ships an EDM scheduler it needs. |

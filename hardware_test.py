@@ -45,16 +45,17 @@ def test_catalog_columns():
 
     keys = [m.key for m in MODELS]
     check("no duplicate keys", len(keys) == len(set(keys)))
-    check("nine models", len(MODELS) == 9)
+    check("ten models", len(MODELS) == 10)
     ranks = [m.quality_rank for m in MODELS]
     check("quality ranks are unique", len(ranks) == len(set(ranks)))
     check("default model still exists", DEFAULT_MODEL in BY_KEY)
 
-    for key in ("lcm-dreamshaper-7", "playground-v25", "flex-1-alpha", "shuttle-3-diffusion"):
+    for key in ("lcm-dreamshaper-7", "sd-turbo", "playground-v25", "flex-1-alpha",
+                "shuttle-3-diffusion"):
         check(f"{key} is in the catalog", key in BY_KEY)
 
     # Distilled and EDM-trained models ship a scheduler that must not be replaced.
-    for key in ("sdxl-turbo", "dreamshaper-xl-turbo", "lcm-dreamshaper-7",
+    for key in ("sdxl-turbo", "sd-turbo", "dreamshaper-xl-turbo", "lcm-dreamshaper-7",
                 "playground-v25", "flex-1-alpha", "shuttle-3-diffusion"):
         check(f"{key} keeps its scheduler", BY_KEY[key].keep_scheduler)
     for key in ("dreamshaper-8", "juggernaut-xl-v9", "realvis-xl-v4"):
@@ -82,7 +83,7 @@ def _profile(device="mps", budget=11.8, ram=16.0, cores=16, perf=1.0, skipped=Fa
     )
 
 
-SD15 = {"lcm-dreamshaper-7", "dreamshaper-8"}
+SD15 = {"lcm-dreamshaper-7", "dreamshaper-8", "sd-turbo"}
 SDXL = {"sdxl-turbo", "dreamshaper-xl-turbo", "juggernaut-xl-v9",
         "realvis-xl-v4", "playground-v25"}
 FLEX = {"flex-1-alpha"}
@@ -104,6 +105,13 @@ MACHINES = [
      SD15 | SDXL | FLEX, "ultra", 4, "flex-1-alpha"),
     ("RTX 3090, 32 GB RAM", dict(device="cuda", budget=21.6, ram=32.0, cores=None, perf=4.0),
      SD15 | SDXL, "high", 4, "dreamshaper-xl-turbo"),
+    # A 4 GiB laptop card, the smallest CUDA machine this catalog claims to
+    # serve: 4.0 * 0.9 of VRAM. SD 1.5 fp16 is ~2.0 GiB of weights and peaks
+    # under 3 GiB at 512px, so this machine is not the "nothing fits" case the
+    # old round 4.0 threshold made it — SDXL, at 6.5 GiB resident, genuinely is.
+    ("RTX 3050 Laptop 4 GB, 32 GB RAM",
+     dict(device="cuda", budget=3.6, ram=32.0, cores=None, perf=1.5),
+     SD15, "low", 1, "dreamshaper-8"),
     ("CPU, 16 GB RAM", dict(device="cpu", budget=9.6, ram=16.0, cores=None, perf=0.04),
      SD15, "cpu", 1, "dreamshaper-8"),
     # Enough RAM for flux on paper (26 GB doubled is well under this budget),

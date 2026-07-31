@@ -17,6 +17,23 @@ Memory columns are GiB (a 16 GB machine reports 16.0); download_gb is decimal GB
 they diverge sharply, because flux pipelines are loaded with
 enable_model_cpu_offload(): one component is resident on the GPU at a time, while
 system RAM still has to hold the whole model. Both must be satisfied.
+
+min_budget_gb starts from the resident fp16 pipeline rather than from a round
+number: every component is loaded at once (only flux offloads), so the floor is
+the sum of the parameter counts times two bytes. On top of that goes an
+allowance for attention-sliced activations, which grows with the entry's default
+resolution — around 0.6-1.2 GiB at 512px, and deliberately generous at 1024px,
+where underestimating costs more than excluding a borderline machine: an
+out-of-memory condition on MPS sometimes hangs the process instead of raising.
+The resident floors are:
+
+    SD 1.5    UNet 860M + VAE 84M + CLIP-L 123M   = 1.07B  -> 1.99 GiB resident
+    SD 2.1    UNet 866M + VAE 84M + OpenCLIP 340M = 1.29B  -> 2.40 GiB resident
+    SDXL      UNet 2.57B + VAE 84M + two encoders = 3.47B  -> 6.46 GiB resident
+
+That is what puts a real 4 GiB card — which reports a 3.6 GiB budget once
+hardware.py subtracts its 10% headroom — on the running side of the SD 1.5 line
+and the blocked side of the SDXL one.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -27,6 +44,8 @@ class ModelSpec:
     key: str
     name: str
     repo: str
+    # The pipeline family, not the checkpoint lineage: "sd15" means
+    # StableDiffusionPipeline, which is also how an SD 2.1 checkpoint loads.
     arch: str  # "sd15" | "sdxl" | "flux"
     download_gb: float
     blurb: str
@@ -59,12 +78,15 @@ MODELS = [
         arch="sd15",
         download_gb=4.3,
         blurb="SD 1.5 distilled with Latent Consistency: usable images in 4-8 steps. "
-        "The lightest entry here — the one that still works on an 8 GB machine. MIT.",
+        "The fastest way to a 768px image on a small machine. MIT.",
         steps=6,
         guidance=1.5,
         width=768,
         height=768,
-        min_budget_gb=4.0,
+        # 1.99 GiB resident, but its 768px default costs roughly 2.25x the
+        # activations of a 512px render — the widest attention maps of the SD 1.5
+        # entries, and the reason this sits above dreamshaper-8.
+        min_budget_gb=3.5,
         min_ram_gb=8,
         baseline_seconds=4,
         baseline_measured=False,
@@ -84,12 +106,40 @@ MODELS = [
         guidance=7.0,
         width=512,
         height=768,
-        min_budget_gb=4.0,
+        # The floor of the catalog: 1.99 GiB resident and under 3 GiB at 512x768.
+        min_budget_gb=3.0,
         min_ram_gb=8,
         baseline_seconds=18,
         baseline_measured=True,
         quality_rank=40,
         tags=["uncensored", "fast", "small"],
+    ),
+    ModelSpec(
+        key="sd-turbo",
+        name="SD Turbo",
+        repo="stabilityai/sd-turbo",
+        # An SD 2.1 checkpoint, loaded by StableDiffusionPipeline like the SD 1.5
+        # entries — the model_index declares a null safety_checker, which the
+        # sd15 load path already passes explicitly.
+        arch="sd15",
+        download_gb=2.6,
+        blurb="Stability's 1-4 step distillation of SD 2.1. The smallest memory "
+        "footprint of the set — a 512px image in a couple of seconds on a 4 GB "
+        "card. No safety checker, but the base was trained on filtered data, so "
+        "it is more restricted in practice than the DreamShaper fine-tunes.",
+        steps=2,
+        guidance=0.0,
+        width=512,
+        height=512,
+        # 2.40 GiB resident; 512px activations keep the peak near 3 GiB.
+        min_budget_gb=3.0,
+        min_ram_gb=8,
+        baseline_seconds=2,
+        baseline_measured=False,
+        quality_rank=28,
+        supports_negative=False,
+        keep_scheduler=True,
+        tags=["fastest", "small", "preview"],
     ),
     # ---------------------------------------------------------------- sdxl ---
     ModelSpec(

@@ -19,7 +19,7 @@ seleccionado con sus parámetros en el centro, y el historial local abajo](docs/
 |---|---|
 | Python | 3.11 o 3.12 (PyTorch no publica wheels para 3.13/3.14) |
 | GPU | Apple Silicon (Metal/MPS) o NVIDIA (CUDA) |
-| Memoria | 8 GB alcanzan para SD 1.5; 16 GB para todos los modelos SDXL; 36 GB o más para la capa flux |
+| Memoria | Una GPU de 4 GB u 8 GB de memoria unificada alcanzan para SD 1.5; 16 GB para todos los modelos SDXL; 36 GB o más para la capa flux |
 | Disco | ~2-4 GB por modelo SD 1.5, ~7 GB por modelo SDXL, 26-34 GB por modelo flux, más ~2.5 GB de dependencias de Python |
 
 El backend se detecta automáticamente — CUDA, después MPS, después CPU — y se
@@ -70,7 +70,7 @@ a ejecutar nunca empieza de cero.
 
 ```bash
 ./download.sh juggernaut-xl-v9  # un modelo específico
-./download.sh all               # todos los modelos (~30 GB)
+./download.sh all               # todos los modelos (~104 GB)
 ./download.sh prune             # borra archivos cacheados que ningún pipeline carga
 ```
 
@@ -85,8 +85,9 @@ derivados Apache-2.0 sin restricción en su lugar.
 
 | Modelo | Arq. | Disco | Requiere | Base | Notas |
 |---|---|---|---|---|---|
-| LCM DreamShaper v7 | SD 1.5 | 4.3 GB | 4 GB GPU / 8 GB RAM | ~4 s | Destilado de consistencia latente, 4-8 pasos. El modelo de las máquinas de 8 GB. MIT. |
-| DreamShaper 8 | SD 1.5 | 2.1 GB | 4 GB GPU / 8 GB RAM | **~18 s** *(medido)* | La descarga más chica. Cobertura de conceptos muy amplia, ecosistema enorme de LoRA. |
+| LCM DreamShaper v7 | SD 1.5 | 4.3 GB | 3.5 GB GPU / 8 GB RAM | ~4 s | Destilado de consistencia latente, 4-8 pasos. El camino más rápido a 768px en una placa chica. MIT. |
+| DreamShaper 8 | SD 1.5 | 2.1 GB | 3 GB GPU / 8 GB RAM | **~18 s** *(medido)* | La descarga más chica. Cobertura de conceptos muy amplia, ecosistema enorme de LoRA. |
+| SD Turbo | SD 2.1 | 2.6 GB | 3 GB GPU / 8 GB RAM | ~2 s | 1-4 pasos a 512px, la huella de memoria más chica del set. Base entrenada con datos filtrados. |
 | SDXL Turbo | SDXL | 6.9 GB | 9.5 GB GPU / 16 GB RAM | ~5 s | Previsualizaciones de 3 pasos a 512px. Ignora prompts negativos y CFG por diseño. |
 | **DreamShaper XL v2 Turbo** | SDXL | 6.9 GB | 9.5 GB GPU / 16 GB RAM | **~40 s** *(medido)* | La mejor calidad por segundo. SDXL a 1024px en 7 pasos. |
 | Playground v2.5 | SDXL | 7.0 GB | 9.5 GB GPU / 16 GB RAM | ~200 s | Entrenado desde cero para estética. Trae un scheduler EDM que necesita. |
