@@ -116,7 +116,7 @@ def test_hero_strings_are_translated() -> None:
                   en_value != es_value)
 
 
-SITE = "https://giancarlobrusca.github.io/local-img/"
+SITE = "https://local-img-seven.vercel.app/"
 
 
 def test_each_page_declares_the_other() -> None:
