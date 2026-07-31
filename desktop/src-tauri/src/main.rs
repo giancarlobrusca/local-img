@@ -6,9 +6,12 @@
 #![allow(dead_code)]
 
 mod events;
+mod layout;
 mod plan;
 mod proc;
+mod progress;
 mod resources;
+mod stamp;
 
 fn main() {
     tauri::Builder::default()
