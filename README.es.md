@@ -19,8 +19,8 @@ seleccionado con sus parámetros en el centro, y el historial local abajo](docs/
 |---|---|
 | Python | 3.11 o 3.12 (PyTorch no publica wheels para 3.13/3.14) |
 | GPU | Apple Silicon (Metal/MPS) o NVIDIA (CUDA) |
-| Memoria | 16 GB unificados, u 8 GB de VRAM, para los modelos SDXL; aproximadamente la mitad para SD 1.5 |
-| Disco | ~2 GB por modelo SD 1.5, ~7 GB por modelo SDXL, más ~2.5 GB de dependencias de Python |
+| Memoria | 8 GB alcanzan para SD 1.5; 16 GB para todos los modelos SDXL; 36 GB o más para la capa flux |
+| Disco | ~2-4 GB por modelo SD 1.5, ~7 GB por modelo SDXL, 26-34 GB por modelo flux, más ~2.5 GB de dependencias de Python |
 
 El backend se detecta automáticamente — CUDA, después MPS, después CPU — y se
 muestra junto al título en la interfaz. Se puede forzar con
@@ -28,13 +28,29 @@ muestra junto al título en la interfaz. Se puede forzar con
 
 **La CPU funciona, pero no es práctica.** No hay kernels fp16 para buena parte de
 la UNet, así que SDXL cae a fp32: ~14 GB de RAM y varios minutos por imagen. Sin
-GPU disponible, conviene usar DreamShaper 8 a 512px y tener paciencia.
+GPU disponible, conviene usar LCM DreamShaper o DreamShaper 8 a 512px y tener
+paciencia.
 
-En GPU, la memoria es la restricción real. SDXL en fp16 son ~7 GB de pesos más
-activaciones, así que la app mantiene **un solo** pipeline residente por vez y
-libera el anterior al cambiar — dos SDXL no entran en 16 GB. FLUX (12B) queda
-deliberadamente afuera: necesita cuantización de 4 bits para entrar en este tipo
-de hardware y aun así tarda varios minutos por imagen.
+En GPU, la memoria es la restricción real. En la primera ejecución la app mide la
+máquina — chip, núcleos de GPU, cuánta memoria va a entregar realmente Metal o
+CUDA, y disco libre — y después muestra solo los modelos que entran, con el resto
+listado junto al número que los bloquea. Nada sale de la computadora: el
+resultado se guarda en `.local-img/profile.json` y se puede rehacer desde la barra
+lateral cuando quieras. También se puede saltear el análisis y ver el catálogo
+completo sin filtrar.
+
+Se mantiene **un solo** pipeline residente por vez y se libera el anterior al
+cambiar — dos SDXL no entran en 16 GB. Los modelos de arquitectura flux se cargan
+con `enable_model_cpu_offload()`, así que solo un componente está en la GPU por
+vez; por eso necesitan menos memoria de GPU que su tamaño de descarga, pero mucha
+más RAM del sistema.
+
+**Los tiempos empiezan siendo estimaciones.** Cada modelo muestra un tiempo por
+imagen escalado desde una máquina de referencia (M1 Pro, GPU de 16 núcleos).
+Después de generar tres imágenes con un modelo, la app pasa a usar la mediana de
+tus propios tiempos registrados y lo aclara. Los factores de escalado para NVIDIA
+son estimaciones sin calibrar hasta que eso ocurre — este proyecto no tiene
+hardware NVIDIA contra el cual medir.
 
 ## Instalación
 
@@ -60,23 +76,36 @@ a ejecutar nunca empieza de cero.
 
 ## Modelos
 
-Elegidos para entrar en una GPU de portátil de 16 GB — todo lo de acá se mantiene
-en memoria y termina en un tiempo razonable.
+Nueve modelos, desde portátiles de 8 GB hasta estaciones de trabajo de 64 GB.
+Todos los repositorios son públicos y resuelven sin token de Hugging Face. Los
+repos con acceso restringido — FLUX.1-schnell, FLUX.1-dev y la familia Stable
+Diffusion 3.5 — quedan deliberadamente afuera: devuelven `GatedRepoError: 401` de
+forma anónima, y esta app no tiene dónde poner un token. La capa flux usa
+derivados Apache-2.0 sin restricción en su lugar.
 
-| Modelo | Disco | Velocidad | Notas |
-|---|---|---|---|
-| **DreamShaper XL v2 Turbo** *(por defecto)* | 6.9 GB | **~40 s** *(medido)* | El mejor equilibrio calidad/velocidad. SDXL a 1024px en 7 pasos. |
-| DreamShaper 8 (SD 1.5) | 2.1 GB | **~18 s** *(medido)* | El más chico y el más rápido. Cobertura de conceptos muy amplia, ecosistema enorme de LoRA. |
-| Juggernaut XL v9 | 7.1 GB | ~3 min *(estimado)* | Especialista en fotorrealismo. Muestreo completo de 30 pasos. |
-| RealVisXL V4.0 | 6.9 GB | ~3 min *(estimado)* | El otro fine-tune fotorrealista de SDXL; mejor con personas. |
-| SDXL Turbo | 6.9 GB | ~5 s *(estimado)* | Previsualizaciones de 3 pasos a 512px. Ignora prompts negativos y CFG por diseño. |
+| Modelo | Arq. | Disco | Requiere | Base | Notas |
+|---|---|---|---|---|---|
+| LCM DreamShaper v7 | SD 1.5 | 4.3 GB | 4 GB GPU / 8 GB RAM | ~4 s | Destilado de consistencia latente, 4-8 pasos. El modelo de las máquinas de 8 GB. MIT. |
+| DreamShaper 8 | SD 1.5 | 2.1 GB | 4 GB GPU / 8 GB RAM | **~18 s** *(medido)* | La descarga más chica. Cobertura de conceptos muy amplia, ecosistema enorme de LoRA. |
+| SDXL Turbo | SDXL | 6.9 GB | 9.5 GB GPU / 16 GB RAM | ~5 s | Previsualizaciones de 3 pasos a 512px. Ignora prompts negativos y CFG por diseño. |
+| **DreamShaper XL v2 Turbo** | SDXL | 6.9 GB | 9.5 GB GPU / 16 GB RAM | **~40 s** *(medido)* | La mejor calidad por segundo. SDXL a 1024px en 7 pasos. |
+| Playground v2.5 | SDXL | 7.0 GB | 9.5 GB GPU / 16 GB RAM | ~200 s | Entrenado desde cero para estética. Trae un scheduler EDM que necesita. |
+| Juggernaut XL v9 | SDXL | 7.1 GB | 9.5 GB GPU / 16 GB RAM | ~180 s | Especialista en fotorrealismo. Muestreo completo de 30 pasos. |
+| RealVisXL V4.0 | SDXL | 6.9 GB | 9.5 GB GPU / 16 GB RAM | ~180 s | El otro fine-tune fotorrealista de SDXL; mejor con personas. |
+| Flex.1 alpha | flux, 8B | 26.3 GB | 20 GB GPU / 36 GB RAM | ~300 s | Derivado Apache-2.0 de schnell con un guidance embedder entrenado. |
+| Shuttle 3 Diffusion | flux, 12B | 33.7 GB | 26 GB GPU / 48 GB RAM | ~120 s | Derivado Apache-2.0 de FLUX.1-schnell. La mejor adherencia al prompt, en 4 pasos. |
 
-Los tiempos son de un **M1 Pro con 16 GB de memoria unificada** — hay que tomarlos
-como punto de referencia, no como especificación. Medido ahí: DreamShaper 8 a
-512×512/20 pasos → **18.8 s**; DreamShaper XL Turbo a 1024×1024/7 pasos →
-**39.5 s** y **42.8 s**. Los dos modelos fotorrealistas están extrapolados del
-costo por paso del XL Turbo, así que esos números son estimados. Una placa NVIDIA
-reciente es bastante más rápida en todos los casos.
+No hay un modelo por defecto fijo. La app recomienda el de mayor calidad que entre
+en la máquina donde corre — DreamShaper XL v2 Turbo en un M1 Pro de 16 GB,
+Shuttle 3 Diffusion en un M4 Max de 64 GB, DreamShaper 8 en una Mac de 8 GB.
+
+Los tiempos base son por imagen en un **M1 Pro con 16 GB de memoria unificada** —
+un punto de referencia, no una especificación, y la interfaz los escala a tu
+máquina. Medido ahí: DreamShaper 8 a 512×512/20 pasos → **18.8 s**; DreamShaper
+XL Turbo a 1024×1024/7 pasos → **39.5 s** y **42.8 s**. El resto está extrapolado
+de esos costos por paso. Los números de flux son los menos confiables: ningún
+modelo flux entra en los 11.8 GB utilizables de esta máquina, así que ese camino
+no está probado acá y sus requisitos de memoria son estimaciones conservadoras.
 
 Los tamaños en disco son lo que el pipeline carga realmente. Los repositorios en
 sí son mucho más grandes: dreamshaper-xl-v2-turbo son 41.6 GB completo, porque
@@ -99,7 +128,9 @@ entrenaron sin filtrado de contenido, así que la restricción no está apenas
 desactivada en tiempo de ejecución: tampoco está en los pesos. Vale la pena
 entenderlo, porque es una propiedad de *los pesos*, no un interruptor. FLUX.1-dev,
 en cambio, se entrenó con datos curados, así que no puede producir lo que nunca
-vio, sin importar la configuración del pipeline.
+vio, sin importar la configuración del pipeline — los modelos de arquitectura
+flux que hay acá son derivados de schnell, que están menos curados pero no sin
+curar.
 
 La salida es tuya, y la responsabilidad también. Generar en local elimina las
 barreras del proveedor, no la ley: las imágenes no consentidas de personas reales
@@ -108,10 +139,16 @@ cualquier jurisdicción, y que «corrió en mi laptop» no cambia nada.
 
 ## Uso
 
+En la primera ejecución un asistente breve mide la máquina y muestra el catálogo
+dividido en lo que recomienda, lo que también funciona, y lo que no entra y por
+qué. Después de eso la barra lateral lleva un resumen del hardware en una línea;
+al hacer clic se abre el perfil completo, un botón de *Re-analizar*, y una casilla
+que muestra los modelos que no entran.
+
 Panel izquierdo: prompt, modelo, prompt negativo y un desplegable de Settings con
 pasos, guidance, dimensiones, cantidad de imágenes y seed. Al elegir un modelo se
-cargan sus valores por defecto recomendados. `Cmd+Enter` en el campo de prompt
-genera.
+cargan sus valores por defecto recomendados, y la cantidad de imágenes queda
+limitada por la memoria medida. `Cmd+Enter` en el campo de prompt genera.
 
 La barra de estado transmite el progreso paso a paso en vivo por SSE — útil,
 porque un render SDXL de 30 pasos tarda un par de minutos. Las imágenes generadas
@@ -129,11 +166,14 @@ rápida de entender a qué responde un modelo.
 
 ```
 app.py           servidor FastAPI — caché de pipelines, cola de trabajos, progreso por SSE
-models.py        registro de modelos (ids de repo, valores por defecto, tamaños)
+models.py        registro de modelos (repos, valores por defecto, tamaños, requisitos)
+hardware.py      detección de la máquina, reglas de compatibilidad, estimaciones de tiempo
 download.py      descarga previa de pesos, reanudable
 delete_test.py   chequeos offline de la ruta de borrado (sin trabajo de GPU)
+hardware_test.py chequeos offline de detección, fit, estimaciones y rutas (sin GPU)
 web/index.html   toda la interfaz, sin paso de build
 outputs/         PNGs generados + sus archivos de parámetros (ignorados por git)
+.local-img/      el perfil de hardware detectado (ignorado por git)
 ```
 
 ## Notas
