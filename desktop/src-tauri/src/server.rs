@@ -4,7 +4,7 @@
 //! → the shell terminates the child here. Shell killed abruptly → nothing here
 //! gets to run, which is why app.py has its own parent watchdog.
 
-use crate::bootstrap::{agent, last_lines};
+use crate::bootstrap::last_lines;
 use crate::layout::Layout;
 use crate::proc::hidden_command;
 use std::collections::VecDeque;
@@ -95,6 +95,21 @@ pub fn handoff_url(port: u16, token: &str, firstrun: bool) -> String {
     format!("http://127.0.0.1:{port}/?token={token}{suffix}")
 }
 
+/// A bounded agent for the two calls that must never hang the UI.
+///
+/// `bootstrap::agent()` deliberately has no global timeout, because a 111 MB
+/// download must not be cut off mid-transfer. These two calls want the
+/// opposite guarantee. A child that accepts the connection and then never
+/// answers would otherwise block `wait_healthy` indefinitely — its own
+/// deadline is only checked *between* attempts, never during one — and would
+/// freeze the close-confirmation prompt while the user is trying to quit.
+fn poll_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(5)))
+        .build()
+        .into()
+}
+
 /// Set the current log aside if it has grown past `max_bytes`.
 ///
 /// One generation, not many. This exists so a Windows user's bug report is a
@@ -126,7 +141,7 @@ impl Server {
     /// Face cache, where a four-minute flux render that has not written its
     /// PNG yet is simply lost.
     pub fn is_generating(&self) -> bool {
-        agent()
+        poll_agent()
             .get(&format!("http://127.0.0.1:{}/api/busy", self.port))
             // A header, not a query parameter. app.py accepts `?token=` on `/`
             // alone, so the token never reaches a log, a Referer, or history.
@@ -160,6 +175,21 @@ impl Server {
     }
 }
 
+impl Drop for Server {
+    /// The backstop for every path that never reaches `shutdown` — a panic
+    /// unwinding out of the caller's setup, or an early return on some later
+    /// error. `std::process::Child` neither kills nor reaps on drop, so
+    /// without this a live Python process holding a multi-GB model can outlive
+    /// the shell that started it, and leave a zombie behind as well.
+    ///
+    /// Harmless after an explicit `shutdown`: the child is already reaped, so
+    /// both calls simply return an error that is discarded.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 /// Start the server, retrying on a port collision.
 ///
 /// Three attempts: `free_port` closes its listener before the child binds, so
@@ -170,25 +200,31 @@ pub fn start(
     resources: &Path,
     outputs: &Path,
 ) -> Result<Server, ServerError> {
-    let mut last = String::new();
-    for attempt in 1..=3 {
+    let mut last: Option<ServerError> = None;
+    for _ in 0..3 {
         match spawn_once(layout, resources, outputs) {
             Ok(server) => return Ok(server),
             Err(e) => {
-                let addr_in_use = e.diagnostics.contains("address already in use")
-                    || e.diagnostics.contains("Only one usage of each socket address")
-                    || e.diagnostics.contains("errno 48");
-                if !addr_in_use || attempt == 3 {
-                    return Err(e);
+                // Lowercase the haystack, not just the needles. asyncio builds
+                // this message from `err.strerror.lower()`, so Windows reports
+                // "only one usage of each socket address..." in lower case and
+                // a capitalised needle would never match — collisions there
+                // would fail on the first attempt instead of retrying. Python
+                // prints "[Errno 48]" with a capital E, hence the brackets.
+                let lowered = e.diagnostics.to_ascii_lowercase();
+                let addr_in_use = lowered.contains("address already in use")
+                    || lowered.contains("only one usage of each socket address")
+                    || lowered.contains("[errno 48]");
+                if !addr_in_use {
+                    return Err(e);      // a real failure — report it as-is
                 }
-                last = e.diagnostics;
+                last = Some(e);
             }
         }
     }
-    Err(ServerError {
-        message: "the port kept being taken by something else".into(),
-        diagnostics: last,
-    })
+    // Three collisions running. Hand back the child's own last words rather
+    // than a summary of them: uvicorn's message names the port it tried.
+    Err(last.expect("the loop reaches here only after recording an error"))
 }
 
 fn spawn_once(
@@ -219,6 +255,15 @@ fn spawn_once(
         // Line-buffered, so the log has content while the child is running
         // rather than only after it dies — which is exactly when it matters.
         .env("PYTHONUNBUFFERED", "1")
+        // Force UTF-8 out of the child. CPython otherwise writes stdout in the
+        // locale codepage on Windows (cp1252, cp932), so a traceback naming a
+        // path with an accent in it arrives as bytes the tee has to guess at.
+        .env("PYTHONIOENCODING", "utf-8")
+        // huggingface_hub's tqdm bars write \r without \n, so a multi-GB
+        // download becomes one enormous "line": it bloats the rotated log for
+        // the rest of the session and lands in the 60-line tail as a single
+        // several-hundred-KB string, crowding out the messages worth reading.
+        .env("HF_HUB_DISABLE_PROGRESS_BARS", "1")
         // A developer's PYTHONPATH must not reach into the private runtime.
         .env_remove("PYTHONPATH")
         .env_remove("PYTHONHOME")
@@ -262,11 +307,30 @@ fn tee<R: std::io::Read + Send + 'static>(stream: R, tail: Tail, log_path: PathB
             .append(true)
             .open(&log_path)
             .ok();
-        for line in BufReader::new(stream).lines().map_while(Result::ok) {
-            if let Some(file) = file.as_mut() {
-                let _ = writeln!(file, "{line}");
+        // Bytes, not `lines()`. `lines()` yields Err on invalid UTF-8, and
+        // ending the loop there would kill this thread permanently — which
+        // does far more than lose a log line. A dead tee stops draining the
+        // pipe, so once the OS buffer fills (~64 KB) the child blocks forever
+        // on its next print and the whole app hangs with no error anywhere.
+        // CPython writes stdout in the locale codepage on Windows, so one
+        // accented character in a traceback is enough to trigger it. Lossy
+        // decoding costs a single glyph instead of the entire channel.
+        let mut reader = BufReader::new(stream);
+        let mut raw = Vec::new();
+        loop {
+            raw.clear();
+            match reader.read_until(b'\n', &mut raw) {
+                Ok(0) | Err(_) => break,     // EOF, or the child is gone
+                Ok(_) => {}
             }
-            tail.push(line);
+            while matches!(raw.last(), Some(b'\n') | Some(b'\r')) {
+                raw.pop();
+            }
+            let text = String::from_utf8_lossy(&raw).into_owned();
+            if let Some(file) = file.as_mut() {
+                let _ = writeln!(file, "{text}");
+            }
+            tail.push(text);
         }
     });
 }
@@ -274,7 +338,7 @@ fn tee<R: std::io::Read + Send + 'static>(stream: R, tail: Tail, log_path: PathB
 fn wait_healthy(server: &mut Server) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{}/api/health", server.port);
     let deadline = Instant::now() + HEALTH_TIMEOUT;
-    let client = agent();
+    let client = poll_agent();
     while Instant::now() < deadline {
         if !server.is_alive() {
             return Err(format!(
@@ -301,7 +365,6 @@ mod tests {
     fn a_free_port_is_plausible_and_not_privileged() {
         let first = free_port().unwrap();
         assert!(first >= 1024, "an ephemeral port is never privileged");
-        assert_ne!(first, 0, "0 means 'pick one for me', never an answer");
 
         let second = free_port().unwrap();
         assert!(second >= 1024);
@@ -368,7 +431,11 @@ mod tests {
     #[test]
     fn rotating_a_log_that_does_not_exist_yet_is_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        rotate_log(&dir.path().join("absent.log"), 1);
+        let log = dir.path().join("absent.log");
+        rotate_log(&log, 1);
+        // The real claim: it neither creates the file nor invents a rotation.
+        assert!(!log.exists());
+        assert!(!dir.path().join("absent.1.log").exists());
     }
 
     #[test]
