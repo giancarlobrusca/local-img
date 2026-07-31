@@ -486,6 +486,39 @@ def test_the_outputs_and_xet_routes_answer():
         png.unlink(missing_ok=True)
 
 
+# --------------------------------------------------------------- the panel ---
+
+PAGE = ROOT / "web" / "index.html"
+
+
+def page() -> str:
+    return PAGE.read_text(encoding="utf-8")
+
+
+def test_the_sidebar_has_a_storage_section():
+    html = page()
+    check("the section exists", 'id="storage"' in html)
+    check("it is labelled Storage", ">Storage<" in html)
+    check("it reads the inventory", "/api/storage" in html)
+    check("it only fetches when opened", "loadStorage" in html)
+
+
+def test_the_panel_offers_a_delete_per_model():
+    html = page()
+    check("a model delete goes to the scoped route",
+          "/api/storage/models/" in html)
+    check("the dedup cache has its own route", "/api/storage/xet" in html)
+    check("the renders have their own route", "/api/storage/outputs" in html)
+    check("the renders' folder is named rather than opened",
+          "outputs.path" in html or "out.path" in html)
+
+
+def test_the_panel_respects_busy():
+    html = page()
+    check("it asks what is in flight", "/api/busy" in html)
+    check("it handles the 409 the routes return anyway", "409" in html)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]

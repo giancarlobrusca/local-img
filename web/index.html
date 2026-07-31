@@ -174,6 +174,37 @@
                 gap: 3px 12px; }
   .hwpanel dt { color: var(--muted); }
   .hwpanel dd { margin: 0; color: var(--text); }
+
+  /* -------------------------------------------------------------- storage -- */
+  .srow {
+    display: flex; gap: 10px; align-items: baseline; padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .srow:last-child { border-bottom: 0; }
+  .srow .what { color: var(--text); }
+  .srow .note { color: var(--muted); font-size: 11px; }
+  .srow .size { margin-left: auto; color: var(--muted);
+                font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .srow button {
+    background: none; border: 1px solid var(--line); border-radius: 6px;
+    color: var(--muted); font: inherit; font-size: 11px; padding: 3px 8px;
+    cursor: pointer;
+  }
+  .srow button:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+  .srow button:disabled { opacity: .4; cursor: default; }
+  .spath {
+    font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px;
+    color: var(--muted); word-break: break-all; margin: 8px 0 0;
+    user-select: all;
+  }
+  #storageBody .danger {
+    width: 100%; margin-top: 12px; padding: 9px; border-radius: var(--radius);
+    background: none; border: 1px solid var(--line); color: var(--danger);
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  #storageBody .danger:hover:not(:disabled) { border-color: var(--danger); }
+  #storageBody .danger:disabled { opacity: .4; cursor: default; }
+
   .banner {
     background: var(--accent-dim); border: 1px solid var(--accent-line); color: var(--accent-text);
     border-radius: var(--radius); padding: 10px 11px; font-size: 12px; line-height: 1.45;
@@ -284,6 +315,13 @@
     </div>
   </details>
 
+  <details id="storage">
+    <summary>Storage</summary>
+    <div>
+      <div class="hwpanel" id="storageBody">…</div>
+    </div>
+  </details>
+
   <button class="primary" id="go">Generate</button>
 </aside>
 
@@ -374,6 +412,134 @@ function showUpdate(info) {
   $('updver').textContent = info.version;
   $('updlink').href = info.url;
   $('updbanner').hidden = false;
+}
+
+// The desktop shell injects its API into this page the same way it injects
+// LOCAL_IMG_UPDATE. In a browser — the repo flow — it is simply absent, and the
+// panel offers the deletions without the uninstall half: the engine there is
+// the user's own .venv and is not this app's business.
+const HAS_SHELL = !!(window.__TAURI__ && window.__TAURI__.core);
+
+let INVENTORY = null, BUSY = false;
+
+function human(bytes) {
+  if (!bytes) return '0 MB';
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+}
+
+async function loadStorage() {
+  $('storageBody').textContent = 'reading…';
+  try {
+    const [inv, busy] = await Promise.all([
+      fetch('/api/storage').then(async r => {
+        if (!r.ok) throw new Error(await errorText(r));
+        return r.json();
+      }),
+      // Courtesy only: the routes check for themselves, because between
+      // painting a button and clicking it there is ample time for a render to
+      // start.
+      fetch('/api/busy').then(r => r.ok ? r.json() : { generating: false, downloading: false }),
+    ]);
+    INVENTORY = inv;
+    BUSY = busy.generating || busy.downloading;
+  } catch (e) {
+    $('storageBody').innerHTML = `<span class="err">${e.message || e}</span>`;
+    return;
+  }
+  renderStorage();
+}
+
+function storageRow(what, bytes, { note = '', deletable = false, id = '' } = {}) {
+  return `<div class="srow">
+            <span class="what">${what}</span>
+            ${note ? `<span class="note">${note}</span>` : ''}
+            <span class="size">${human(bytes)}</span>
+            ${deletable ? `<button data-del="${id}" ${BUSY ? 'disabled' : ''}>Delete</button>` : ''}
+          </div>`;
+}
+
+// Replaced in the next task by the confirmation that enumerates.
+function openWipe() {}
+
+function renderStorage() {
+  const inv = INVENTORY;
+  if (!inv) return;
+  const out = inv.outputs;
+  let html = '';
+
+  // The engine is measured and never deleted from here: Python is running from
+  // inside it. Only the shell can take that step, and only at the very end.
+  if (inv.runtime) html += storageRow('Python engine', inv.runtime);
+
+  for (const m of inv.models) {
+    html += storageRow(m.name, m.bytes, {
+      // A half-finished download reports incomplete with real bytes, and is
+      // offered anyway: those gigabytes are recoverable garbage, and are
+      // exactly what someone opens this panel to find.
+      note: m.complete ? '' : 'incomplete download',
+      deletable: true,
+      id: `model:${m.key}`,
+    });
+  }
+
+  if (inv.xet) {
+    html += storageRow('Dedup cache', inv.xet, {
+      note: 'a copy of weights already on disk',
+      deletable: true,
+      id: 'xet',
+    });
+  }
+  if (inv.rest) html += storageRow('Logs and settings', inv.rest);
+
+  html += storageRow(
+    `${out.count} image${out.count === 1 ? '' : 's'}`, out.bytes,
+    out.count ? { deletable: true, id: 'outputs' } : {}
+  );
+  html += `<p class="spath">${out.path}</p>`;
+
+  html += `<button class="danger" id="wipe" ${BUSY ? 'disabled' : ''}>` +
+          (HAS_SHELL ? 'Delete everything and uninstall' : 'Delete weights and images') +
+          '</button>';
+  if (BUSY) html += '<p class="note">Something is in flight — deleting is off until it finishes.</p>';
+
+  $('storageBody').innerHTML = html;
+  $('storageBody').querySelectorAll('[data-del]').forEach(button => {
+    button.onclick = () => deleteOne(button.dataset.del);
+  });
+  $('wipe').onclick = openWipe;
+}
+
+// Returns { freed, resisted } or throws with the server's own message — which
+// for a 409 is the route saying a render or a download started after the button
+// was painted. The disabled state above is courtesy; this is the real guard.
+async function storageDelete(path) {
+  const res = await fetch(path, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await errorText(res));
+  return res.json();
+}
+
+async function deleteOne(id) {
+  const [kind, key] = id.split(':');
+  const what = kind === 'model' ? MODELS[key].name
+             : kind === 'xet' ? 'the dedup cache'
+             : 'every image you have generated';
+  if (!confirm(`Delete ${what}?`)) return;
+  try {
+    const { freed, resisted } = await storageDelete(
+      kind === 'model' ? `/api/storage/models/${encodeURIComponent(key)}`
+      : kind === 'xet' ? '/api/storage/xet'
+      : '/api/storage/outputs'
+    );
+    setStatus(resisted.length
+      ? `freed ${human(freed)}; ${resisted.length} file(s) would not delete`
+      : `freed ${human(freed)}`);
+  } catch (e) {
+    setStatus(String(e.message || e), '', true);
+  }
+  await loadStorage();
+  // The catalog's "ready" flags and the gallery both just changed.
+  await refresh().catch(() => {});
+  loadGallery();
 }
 
 async function boot() {
@@ -792,6 +958,9 @@ $('del').onclick = () => { if (current) removeImage(current); };
 $('prompt').addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate();
 });
+// Fetched when the section is opened, not on boot: it walks the model cache,
+// and the page has no reason to do that before someone asks.
+$('storage').addEventListener('toggle', () => { if ($('storage').open) loadStorage(); });
 boot();
 </script>
 </body>
