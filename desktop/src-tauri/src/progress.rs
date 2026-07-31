@@ -57,6 +57,21 @@ pub fn human_gb(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }
 
+/// A size in whichever unit suits it.
+///
+/// The Python archive is 25–111 MB; the dependency install is 1–7 GB. Both are
+/// reported through the same progress line, so fixing the unit at GB makes the
+/// entire download phase read "0.0 GB of 0.0 GB" — which is the first text a
+/// new user ever sees from this app. Use `human_gb` where the quantity is
+/// always large (disk requirements); use this where it varies.
+pub fn human_size(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        format!("{:.1} GB", bytes as f64 / 1e9)
+    } else {
+        format!("{:.0} MB", bytes as f64 / 1e6)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +133,15 @@ mod tests {
         assert_eq!(human_gb(0), "0.0 GB");
         assert_eq!(human_gb(1_500_000_000), "1.5 GB");
         assert_eq!(human_gb(7_000_000_000), "7.0 GB");
+    }
+
+    #[test]
+    fn human_size_picks_the_unit_that_suits_the_number() {
+        // The download phase is tens of megabytes; rendering it in GB would
+        // show "0.0 MB of 0.0 GB" for its whole duration.
+        assert_eq!(human_size(25_149_265), "25 MB");
+        assert_eq!(human_size(111_358_187), "111 MB");
+        assert_eq!(human_size(1_500_000_000), "1.5 GB");
+        assert_eq!(human_size(0), "0 MB");
     }
 }

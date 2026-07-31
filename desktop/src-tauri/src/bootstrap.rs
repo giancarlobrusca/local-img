@@ -94,9 +94,7 @@ pub fn run(
 
     check_disk(plan, layout)?;
 
-    // A previous attempt may have left a partial tree. Removing it up front
-    // means extraction never merges two different Python builds.
-    let _ = std::fs::remove_dir_all(&layout.runtime_dir);
+    clear_for_rebuild(layout)?;
     std::fs::create_dir_all(&layout.runtime_dir).map_err(|e| {
         BootstrapError::new(
             "Could not create the app's folder",
@@ -138,6 +136,39 @@ pub fn run(
     Ok(Report {
         site_packages_bytes: dir_size(&layout.site_packages),
     })
+}
+
+/// Clears the ground for a rebuild: the stamp first, then the runtime tree.
+///
+/// The stamp goes FIRST, and separately, because it lives beside the runtime
+/// directory rather than inside it — wiping the directory does not touch it.
+/// A stamp that survives into a rebuild can certify a runtime whose dependency
+/// install was then interrupted: the interpreter is back on disk, the stamp
+/// still matches, and the next launch skips the whole bootstrap and starts
+/// against a runtime with no torch in it. Removing it here means any
+/// interruption from this point on leaves no stamp, which already forces a
+/// redo.
+///
+/// The directory removal's failure is surfaced rather than swallowed: on
+/// Windows a still-running python.exe, or a permission problem, would
+/// otherwise let `unpack` silently merge into a half-old tree. Absent is the
+/// one acceptable outcome.
+fn clear_for_rebuild(layout: &Layout) -> Result<(), BootstrapError> {
+    let _ = std::fs::remove_file(&layout.stamp_path);
+
+    if let Err(e) = std::fs::remove_dir_all(&layout.runtime_dir) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(BootstrapError::new(
+                "Could not clear the previous engine",
+                format!(
+                    "{}: {e}. If local-img is already running, close it and try again.",
+                    layout.runtime_dir.display()
+                ),
+                true,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn check_disk(plan: &RuntimePlan, layout: &Layout) -> Result<(), BootstrapError> {
@@ -218,7 +249,7 @@ fn download(
         if now != last_reported {
             last_reported = now;
             on_progress("python", now, format!(
-                "{} of {}", progress::human_gb(done), progress::human_gb(total)
+                "{} of {}", progress::human_size(done), progress::human_size(total)
             ));
         }
     }
@@ -407,7 +438,7 @@ fn run_pip(
             "Installing the dependencies failed",
             // Verbatim, per the spec. A paraphrase of a pip failure helps
             // nobody; the last lines are where the reason actually is.
-            last_lines(&text, 12),
+            format!("pip exited with {s}\n{}", last_lines(&text, 12)),
             true,
         )
         .with_diagnostics(text)),
