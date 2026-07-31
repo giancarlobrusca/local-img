@@ -88,7 +88,7 @@ def needed_files(snapshot: Path) -> set[Path]:
         return set()
 
     keep = {index}
-    spec = json.loads(index.read_text())
+    spec = json.loads(index.read_text(encoding="utf-8"))
     components = [
         name for name, value in spec.items()
         if not name.startswith("_") and isinstance(value, list) and (snapshot / name).is_dir()

@@ -490,6 +490,34 @@ def test_temp_profile_helper_restores_the_global():
     check("PROFILE_PATH was restored", hardware.PROFILE_PATH == real_path)
 
 
+def test_page_is_read_as_utf8_whatever_the_locale():
+    """The page must not be decoded with the platform's locale encoding.
+
+    index.html is UTF-8 and full of typographic characters (·, —). Reading it
+    without an explicit encoding uses the C locale's idea of text, which on a
+    Windows machine is cp1252 — every multi-byte character then reaches the
+    browser as mojibake ("Â·", "â€""), and on a strictly ASCII locale the route
+    raises outright. Forcing LC_CTYPE to C here reproduces both on any platform.
+    """
+    import locale
+
+    import app as app_module
+
+    previous = locale.setlocale(locale.LC_CTYPE)
+    try:
+        locale.setlocale(locale.LC_CTYPE, "C")
+        page = app_module.index()
+    except UnicodeDecodeError:
+        page = ""
+        check("the page is served under an ASCII locale", False)
+    finally:
+        locale.setlocale(locale.LC_CTYPE, previous)
+
+    check("the middot separator survives", "·" in page)
+    check("the em dash survives", "—" in page)
+    check("no cp1252 mojibake reached the page", "Â·" not in page and "â€" not in page)
+
+
 def test_models_route_without_a_profile():
     import hardware
     import app as app_module

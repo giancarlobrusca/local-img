@@ -169,7 +169,7 @@ def derive_tier(profile: HardwareProfile, specs) -> str:
 def save(profile: HardwareProfile, path=None) -> Path:
     path = Path(path or PROFILE_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(profile), indent=2))
+    path.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
     return path
 
 
@@ -184,7 +184,7 @@ def load(path=None) -> HardwareProfile | None:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if data.get("schema_version") != SCHEMA_VERSION:
@@ -471,7 +471,7 @@ def read_history(outputs_dir) -> dict[str, list[float]]:
         return history
     for path in outputs_dir.glob("*.json"):
         try:
-            meta = json.loads(path.read_text())
+            meta = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         key, seconds = meta.get("model"), meta.get("seconds")

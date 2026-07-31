@@ -279,7 +279,7 @@ def run_job(job: Job, req: GenerateRequest):
                     "seed": seed,
                     "seconds": round(time.time() - started, 1),
                 }
-                path.with_suffix(".json").write_text(json.dumps(meta, indent=2))
+                path.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
                 job.emit(stage="image", url=f"/outputs/{name}", meta=meta)
 
         job.emit(stage="done")
@@ -501,14 +501,18 @@ def gallery(limit: int = 40):
     items = []
     for p in pngs[:limit]:
         meta_path = p.with_suffix(".json")
-        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
         items.append({"url": f"/outputs/{p.name}", "meta": meta})
     return {"items": items}
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (ROOT / "web" / "index.html").read_text()
+    # encoding="utf-8" is not optional. Without it Python decodes with the
+    # platform's locale encoding — cp1252 on a Windows machine — and every
+    # typographic character in the page (·, —) reaches the browser as mojibake,
+    # or the route raises outright on a strictly ASCII locale.
+    return (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
 
 @app.get("/outputs/{name}")
