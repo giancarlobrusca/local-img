@@ -24,9 +24,13 @@ from pathlib import Path
 
 import torch
 
+import paths
 from models import BY_KEY, DEFAULT_MODEL, MODELS
 
-HUB = Path.home() / ".cache" / "huggingface" / "hub"
+# Derived, not repeated. paths.hf_cache_dir() computes this same location for
+# the rest of the codebase, and two sources of truth for one path is exactly
+# what you do not want under code that deletes things.
+HUB = paths.hf_cache_dir() / "hub"
 
 
 def _pipeline_cls(spec):
@@ -71,6 +75,90 @@ def fetch(spec, attempts=6):
 
 def repo_dir(repo: str) -> Path:
     return HUB / ("models--" + repo.replace("/", "--"))
+
+
+def xet_dir() -> Path:
+    """The Xet chunk cache — a sibling of `hub` in the same Hugging Face cache.
+
+    Derived from HUB rather than from paths, so that redirecting the cache
+    redirects both halves of it together.
+    """
+    return HUB.parent / "xet"
+
+
+def dir_size(path: Path) -> int:
+    """Bytes a directory tree occupies, counting each real file exactly once.
+
+    Symlinks are skipped rather than followed. The cache keeps every real byte
+    in `blobs/` and fills `snapshots/` with links into them, so following the
+    links would double every figure. On a Windows install without symlink
+    privileges huggingface_hub copies instead of linking — there the snapshot
+    entries are real files, and counting them is right, because deleting the
+    repo really does free them.
+
+    An unreadable entry is skipped rather than raised: this feeds a panel, and
+    one quarantined file must not blank the whole thing.
+    """
+    if not path.exists():
+        return 0
+    total = 0
+    for entry in path.rglob("*"):
+        try:
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def remove_tree(path: Path) -> tuple[int, list[str]]:
+    """Delete a directory tree. Returns bytes freed and the paths that resisted.
+
+    Written out rather than delegated to shutil.rmtree for two reasons. Its
+    failure hook was renamed between 3.11 (`onerror`) and 3.12 (`onexc`), and
+    this project supports both. And rmtree gives up on the first failure, where
+    what is wanted here is for one file an antivirus has locked to cost exactly
+    that file — the other nine models still have to come off the disk.
+    """
+    if not path.exists():
+        return 0, []
+    freed = 0
+    resisted: list[str] = []
+    # Deepest first, so a directory is only ever removed after its contents.
+    # The list is materialized before anything is unlinked.
+    entries = sorted(path.rglob("*"), key=lambda p: len(p.parts), reverse=True)
+    for entry in entries:
+        try:
+            if entry.is_symlink():
+                entry.unlink()          # a link holds no bytes of its own
+            elif entry.is_file():
+                size = entry.stat().st_size
+                entry.unlink()
+                freed += size
+            elif entry.is_dir():
+                entry.rmdir()
+        except OSError:
+            resisted.append(str(entry))
+    try:
+        path.rmdir()
+    except OSError:
+        resisted.append(str(path))
+    return freed, resisted
+
+
+def size_on_disk(spec) -> int:
+    """Bytes this model occupies. Blobs only — snapshots are symlinks to them."""
+    return dir_size(repo_dir(spec.repo))
+
+
+def remove(spec) -> tuple[int, list[str]]:
+    """Delete the repo directory. Returns bytes freed and any paths that resisted.
+
+    Scoped by `repo_dir`, which maps a catalog entry to exactly one directory.
+    There is no path here a caller can influence beyond choosing a spec.
+    """
+    return remove_tree(repo_dir(spec.repo))
 
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".ckpt", ".pt", ".onnx")
@@ -157,7 +245,7 @@ def prune():
         print(f"  {spec.name}: freed {freed / 1e9:.1f} GB")
 
     # Xet keeps a separate chunk cache that is pure duplicate of the blobs.
-    xet = Path.home() / ".cache" / "huggingface" / "xet"
+    xet = xet_dir()
     if xet.exists():
         size = sum(f.stat().st_size for f in xet.rglob("*") if f.is_file())
         shutil.rmtree(xet, ignore_errors=True)
