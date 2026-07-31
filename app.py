@@ -61,6 +61,36 @@ app = FastAPI(title="local-img")
 
 # ---------------------------------------------------------------- pipeline ---
 
+def pipeline_plan(spec) -> dict:
+    """How this model is loaded, as data — so the decision is testable without
+    a GPU, a download, or an import of diffusers.
+
+    flux pipelines are bf16 (the published weights already are) and CPU-offloaded
+    rather than moved onto the device: only one component is resident on the GPU
+    at a time, which is why min_budget_gb is far below the download size while
+    min_ram_gb is far above it.
+    """
+    if spec.arch == "flux":
+        return {
+            "pipeline": "FluxPipeline",
+            "dtype": torch.bfloat16,
+            "offload": True,
+            "override_scheduler": False,
+            "disable_safety": False,
+        }
+    return {
+        "pipeline": "StableDiffusionXLPipeline" if spec.arch == "sdxl"
+                    else "StableDiffusionPipeline",
+        "dtype": DTYPE,
+        "offload": False,
+        # Distilled and EDM-trained models need their shipped scheduler;
+        # everything else converges much better on DPM++ SDE Karras.
+        "override_scheduler": not spec.keep_scheduler,
+        # No content filter. Nothing is blurred or replaced on the way out.
+        "disable_safety": spec.arch == "sd15",
+    }
+
+
 class PipelineCache:
     """Holds at most one pipeline in memory — 16 GB unified memory can't hold two SDXLs."""
 
@@ -87,16 +117,14 @@ class PipelineCache:
         spec = BY_KEY[key]
         on_status(f"loading {spec.name} (first run downloads ~{spec.download_gb} GB)")
 
-        from diffusers import (
-            DPMSolverMultistepScheduler,
-            StableDiffusionPipeline,
-            StableDiffusionXLPipeline,
-        )
+        plan = pipeline_plan(spec)
 
-        cls = StableDiffusionXLPipeline if spec.arch == "sdxl" else StableDiffusionPipeline
-        kwargs = dict(torch_dtype=DTYPE, use_safetensors=True)
-        if spec.arch == "sd15":
-            # No content filter. Nothing is blurred or replaced on the way out.
+        from diffusers import DPMSolverMultistepScheduler
+        import diffusers
+
+        cls = getattr(diffusers, plan["pipeline"])
+        kwargs = dict(torch_dtype=plan["dtype"], use_safetensors=True)
+        if plan["disable_safety"]:
             kwargs.update(safety_checker=None, requires_safety_checker=False)
 
         # Multi-GB downloads over a flaky link drop mid-transfer; already-fetched
@@ -107,6 +135,8 @@ class PipelineCache:
                 try:
                     pipe = cls.from_pretrained(spec.repo, variant="fp16", **kwargs)
                 except (ValueError, OSError, EnvironmentError):
+                    # Neither flux repo publishes an fp16 variant — those weights
+                    # are already bf16 — and not every repo ships one per component.
                     pipe = cls.from_pretrained(spec.repo, **kwargs)
                 break
             except Exception as exc:
@@ -119,9 +149,7 @@ class PipelineCache:
                 on_status(f"download interrupted, resuming (attempt {attempt + 2}/4)")
                 time.sleep(2 + 3 * attempt)
 
-        # Distilled turbo models need their shipped scheduler; everything else
-        # converges much better on DPM++ SDE Karras at 25-30 steps.
-        if "turbo" not in spec.key:
+        if plan["override_scheduler"]:
             pipe.scheduler = DPMSolverMultistepScheduler.from_config(
                 pipe.scheduler.config,
                 algorithm_type="sde-dpmsolver++",
@@ -129,9 +157,13 @@ class PipelineCache:
             )
 
         pipe.set_progress_bar_config(disable=True)
-        pipe = pipe.to(DEVICE)
-        pipe.enable_attention_slicing()
-        pipe.vae.enable_slicing()  # keeps VAE decode of a 1024px latent inside 16 GB
+        if plan["offload"]:
+            # One component on the GPU at a time; the rest waits in system RAM.
+            pipe.enable_model_cpu_offload()
+        else:
+            pipe = pipe.to(DEVICE)
+            pipe.enable_attention_slicing()
+            pipe.vae.enable_slicing()  # keeps VAE decode of a 1024px latent inside 16 GB
 
         self.pipe, self.key = pipe, key
         return pipe
@@ -166,6 +198,27 @@ class GenerateRequest(BaseModel):
     height: int = Field(default=0, ge=0, le=1536)
     seed: int = -1
     batch: int = Field(default=1, ge=1, le=4)
+
+
+_MEMORY_SIGNS = ("out of memory", "outofmemory", "cannot allocate",
+                 "insufficient memory", "failed to allocate")
+
+
+def memory_hint(exc: Exception, spec) -> str:
+    """A suggestion appended to a failure that looks like memory exhaustion.
+
+    Note the real limit: on MPS an out-of-memory condition sometimes hangs or
+    kills the process instead of raising cleanly. That is precisely why the
+    default hides non-fitting models rather than merely warning about them —
+    this message only helps in the cases that do raise.
+    """
+    if spec is None:
+        return ""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if not any(sign in text for sign in _MEMORY_SIGNS):
+        return ""
+    return (f" — {spec.name} did not fit in memory. Pick a smaller model; "
+            f"the hardware panel in the sidebar lists what this machine can run.")
 
 
 def run_job(job: Job, req: GenerateRequest):
@@ -231,7 +284,8 @@ def run_job(job: Job, req: GenerateRequest):
 
         job.emit(stage="done")
     except Exception as exc:  # surfaced verbatim in the UI
-        job.emit(stage="error", message=f"{type(exc).__name__}: {exc}")
+        hint = memory_hint(exc, BY_KEY.get(req.model))
+        job.emit(stage="error", message=f"{type(exc).__name__}: {exc}{hint}")
     finally:
         job.done = True
 

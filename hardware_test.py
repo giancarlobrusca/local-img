@@ -619,6 +619,70 @@ def test_download_route_starts_a_job():
         restore()
 
 
+# ----------------------------------------------------------- pipeline plan ---
+
+def test_pipeline_plan_per_arch():
+    import torch
+    import app as app_module
+    from models import BY_KEY
+
+    sd15 = app_module.pipeline_plan(BY_KEY["dreamshaper-8"])
+    check("sd15 uses StableDiffusionPipeline", sd15["pipeline"] == "StableDiffusionPipeline")
+    check("sd15 disables the safety checker", sd15["disable_safety"] is True)
+    check("sd15 stays on the device", sd15["offload"] is False)
+    check("sd15 takes the DPM++ override", sd15["override_scheduler"] is True)
+    check("sd15 uses the app dtype", sd15["dtype"] is app_module.DTYPE)
+
+    sdxl = app_module.pipeline_plan(BY_KEY["dreamshaper-xl-turbo"])
+    check("sdxl uses StableDiffusionXLPipeline", sdxl["pipeline"] == "StableDiffusionXLPipeline")
+    check("sdxl has no safety checker to disable", sdxl["disable_safety"] is False)
+    check("a turbo model keeps its scheduler", sdxl["override_scheduler"] is False)
+    check("sdxl stays on the device", sdxl["offload"] is False)
+
+    edm = app_module.pipeline_plan(BY_KEY["playground-v25"])
+    check("playground keeps its EDM scheduler", edm["override_scheduler"] is False)
+
+    flux = app_module.pipeline_plan(BY_KEY["shuttle-3-diffusion"])
+    check("flux uses FluxPipeline", flux["pipeline"] == "FluxPipeline")
+    check("flux runs bf16", flux["dtype"] is torch.bfloat16)
+    check("flux is cpu-offloaded", flux["offload"] is True)
+    check("flux keeps its scheduler", flux["override_scheduler"] is False)
+    check("flux has no safety checker to disable", flux["disable_safety"] is False)
+
+
+def test_download_picks_a_pipeline_class_for_every_arch():
+    import download
+    from models import MODELS
+
+    names = {s.key: download._pipeline_cls(s).__name__ for s in MODELS}
+    check("sd15 -> StableDiffusionPipeline",
+          names["dreamshaper-8"] == "StableDiffusionPipeline")
+    check("sdxl -> StableDiffusionXLPipeline",
+          names["dreamshaper-xl-turbo"] == "StableDiffusionXLPipeline")
+    check("flux -> FluxPipeline", names["shuttle-3-diffusion"] == "FluxPipeline")
+    check("flux -> FluxPipeline (flex)", names["flex-1-alpha"] == "FluxPipeline")
+
+
+def test_memory_hint_only_fires_on_memory_failures():
+    import app as app_module
+    from models import BY_KEY
+
+    spec = BY_KEY["shuttle-3-diffusion"]
+    for message in (
+        "MPS backend out of memory (MPS allocated: 11.20 GB)",
+        "CUDA out of memory. Tried to allocate 2.00 GiB",
+        "Cannot allocate memory",
+    ):
+        hint = app_module.memory_hint(RuntimeError(message), spec)
+        check(f"a memory failure gets a suggestion: {message[:24]}", "smaller model" in hint)
+        check(f"the suggestion names the model: {message[:24]}", spec.name in hint)
+
+    check("an ordinary failure gets no suggestion",
+          app_module.memory_hint(ValueError("prompt is empty"), spec) == "")
+    check("a missing spec is handled",
+          app_module.memory_hint(RuntimeError("out of memory"), None) == "")
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]

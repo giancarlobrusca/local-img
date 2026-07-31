@@ -30,26 +30,34 @@ HUB = Path.home() / ".cache" / "huggingface" / "hub"
 
 
 def _pipeline_cls(spec):
-    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
+    from diffusers import (
+        FluxPipeline,
+        StableDiffusionPipeline,
+        StableDiffusionXLPipeline,
+    )
 
-    return StableDiffusionXLPipeline if spec.arch == "sdxl" else StableDiffusionPipeline
+    return {
+        "flux": FluxPipeline,
+        "sdxl": StableDiffusionXLPipeline,
+    }.get(spec.arch, StableDiffusionPipeline)
 
 
 def fetch(spec, attempts=6):
     """Download one model. Returns the snapshot folder, or None on failure."""
     cls = _pipeline_cls(spec)
+    dtype = torch.bfloat16 if spec.arch == "flux" else torch.float16
     print(f"\n=== {spec.name}  ({spec.repo}, ~{spec.download_gb} GB)")
     for attempt in range(1, attempts + 1):
         try:
             try:
                 folder = cls.download(
                     spec.repo, variant="fp16", use_safetensors=True,
-                    torch_dtype=torch.float16,
+                    torch_dtype=dtype,
                 )
             except (ValueError, OSError, EnvironmentError):
                 # Not every repo publishes an fp16 variant of every component.
                 folder = cls.download(
-                    spec.repo, use_safetensors=True, torch_dtype=torch.float16,
+                    spec.repo, use_safetensors=True, torch_dtype=dtype,
                 )
             print(f"--- {spec.name}: complete")
             return Path(folder)
