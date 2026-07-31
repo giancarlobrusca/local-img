@@ -25,11 +25,24 @@ pub const CPU_INDEX: &str = "https://download.pytorch.org/whl/cpu";
 
 /// Expected `site-packages` totals, in bytes, used only to turn a growing
 /// directory into a percentage. Wrong by 20% costs a bar that moves unevenly;
-/// wrong by an order of magnitude costs a bar that looks stuck. The CI smoke
-/// job prints the measured size on each platform so these get calibrated
-/// rather than guessed — see .github/workflows/smoke.yml.
-const SITE_PACKAGES_MACOS: u64 = 1_050_000_000;
+/// wrong by an order of magnitude costs a bar that looks stuck.
+/// `--bootstrap-only` (see .github/workflows/smoke.yml) prints the measured
+/// size on whatever platform it runs on, so each of these gets replaced with
+/// a real number as that platform is measured — macOS below is; Windows and
+/// Linux are not yet.
+///
+/// Measured by `--bootstrap-only` on an M-series Mac: 922,053,753 bytes of
+/// site-packages after torch and requirements.txt install from PyPI. Rounded
+/// up, because a bar that reaches 99 slightly late reads better than one that
+/// sits there. Wrong by 20% costs a bar that moves unevenly; wrong by an order
+/// of magnitude costs a bar that looks stuck.
+const SITE_PACKAGES_MACOS: u64 = 925_000_000;
+/// Not yet measured: only the CI smoke job's Windows and Ubuntu jobs can
+/// measure this, and neither has run yet. Take the larger of the two the
+/// first time they do.
 const SITE_PACKAGES_CPU: u64 = 1_400_000_000;
+/// Not measured: the cuda-index job is manual and has not been run. This is
+/// still the estimate. Replace it the first time that job runs.
 const SITE_PACKAGES_CUDA: u64 = 7_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
