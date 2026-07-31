@@ -25,9 +25,11 @@ The quickest way in: one file, no terminal, no Python.
 
 **[Download the latest release →](https://github.com/giancarlobrusca/local-img/releases/latest)**
 
-On first launch the app downloads its own Python engine (about 1 GB), measures
-your machine, recommends a model that fits, and asks before downloading it.
-Everything after that is offline. Images are saved to `Pictures/local-img`.
+On first launch the app downloads its own Python engine — about 1 GB on a Mac,
+or up to 7 GB on a PC with an NVIDIA card, where PyTorch ships the much larger
+CUDA build — then measures your machine, recommends a model that fits, and
+asks before downloading it. Everything after that is offline. Images are
+saved to `Pictures/local-img`.
 
 Intel Macs are not supported: without Metal every image would be generated on
 the CPU, which the [CPU note](#requirements) below explains is impractical

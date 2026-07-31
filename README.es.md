@@ -25,10 +25,11 @@ La vía rápida: un archivo, sin terminal y sin Python.
 
 **[Descargar la última versión →](https://github.com/giancarlobrusca/local-img/releases/latest)**
 
-En el primer arranque la app descarga su propio motor de Python (alrededor de
-1 GB), mide la máquina, recomienda un modelo que entre y pregunta antes de
-descargarlo. De ahí en adelante funciona sin conexión. Las imágenes se guardan
-en `Pictures/local-img`.
+En el primer arranque la app descarga su propio motor de Python — alrededor de
+1 GB en una Mac, o hasta 7 GB en una PC con placa NVIDIA, donde PyTorch trae la
+build de CUDA, mucho más pesada — mide la máquina, recomienda un modelo que
+entre y pregunta antes de descargarlo. De ahí en adelante funciona sin
+conexión. Las imágenes se guardan en `Pictures/local-img`.
 
 Las Mac con Intel no están soportadas: sin Metal cada imagen se generaría en la
 CPU, que como explica la [nota sobre CPU](#requisitos) más abajo no es lento
