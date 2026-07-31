@@ -13,7 +13,12 @@ use std::process::Command;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub fn hidden_command(program: &Path) -> Command {
+    // `mut` only on Windows: it is the sole platform that mutates the command
+    // here, and binding it `mut` on Unix is an unused_mut warning.
+    #[cfg(windows)]
     let mut command = Command::new(program);
+    #[cfg(not(windows))]
+    let command = Command::new(program);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

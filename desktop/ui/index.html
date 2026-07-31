@@ -37,11 +37,28 @@
   .primary:hover { filter: brightness(1.08); }
   .primary:disabled { opacity: .5; cursor: default; }
   [hidden] { display: none !important; }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 3px;
+         overflow: hidden; margin: 20px 0 8px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent);
+             transition: width .3s ease; }
+  .sub { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px;
+         color: var(--muted); min-height: 16px; overflow: hidden;
+         white-space: nowrap; text-overflow: ellipsis; }
+  .err { color: var(--danger); }
+  pre { background: var(--panel-2); border: 1px solid var(--line);
+        border-radius: var(--radius); padding: 12px; font-size: 11px;
+        max-height: 220px; overflow: auto; white-space: pre-wrap;
+        color: var(--muted); }
+  .row { display: flex; gap: 12px; align-items: center; margin-top: 18px; }
+  .link { background: none; border: 0; padding: 0; color: var(--muted);
+          font: inherit; font-size: 12px; text-decoration: underline;
+          cursor: pointer; }
+  .link:hover { color: var(--text); }
 </style>
 </head>
 <body>
 
-<div class="card" id="welcome">
+<div class="card" id="welcome" hidden>
   <h1>Welcome to local-img</h1>
   <p>This generates images on your own machine. No account, no API key, no
      cloud — and nothing you type or produce leaves this computer.</p>
@@ -52,10 +69,120 @@
   <button class="primary" id="start">Set up local-img</button>
 </div>
 
+<div class="card" id="progress" hidden>
+  <h1 id="progressTitle">Setting up</h1>
+  <p id="progressBody">This happens once. The next launch opens straight into
+     the app.</p>
+  <div class="bar"><i id="fill"></i></div>
+  <div class="sub" id="detail"></div>
+</div>
+
+<div class="card" id="failure" hidden>
+  <h1 id="failTitle">Something went wrong</h1>
+  <p id="failMessage"></p>
+  <pre id="failDetail" hidden></pre>
+  <div class="row">
+    <button class="primary" id="retry" hidden>Try again</button>
+    <button class="link" id="reinstall">Reinstall the engine</button>
+    <button class="link" id="copy">Copy diagnostics</button>
+    <button class="link" id="logs">Open the log folder</button>
+  </div>
+</div>
+
 <script>
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
 const $ = id => document.getElementById(id);
-// Filled in by the shell in Task 10; until then the welcome screen is static.
-$('engineSize').textContent = '1–2 GB';
+
+function show(which) {
+  for (const id of ['welcome', 'progress', 'failure']) $(id).hidden = id !== which;
+}
+
+// Two phases share one bar, weighted by how long each actually takes. The
+// engine download is minutes; pip is longer, and on a CUDA machine much
+// longer. Splitting the bar rather than resetting it keeps it monotonic.
+const WEIGHTS = { python: [0, 25], deps: [25, 98], server: [98, 100] };
+
+listen('shell://progress', ({ payload }) => {
+  show('progress');
+  const [from, to] = WEIGHTS[payload.phase] || [0, 100];
+  // 255 means "subtext only" — the detail line arrives far more often than
+  // the bar moves, and following it would make the bar stutter.
+  if (payload.pct !== 255) {
+    $('fill').style.width = (from + (to - from) * (payload.pct / 100)) + '%';
+  }
+  if (payload.detail) $('detail').textContent = payload.detail;
+  $('progressTitle').textContent =
+    payload.phase === 'python' ? 'Downloading the engine'
+    : payload.phase === 'deps' ? 'Installing the engine'
+    : 'Starting up';
+});
+
+listen('shell://failed', ({ payload }) => {
+  show('failure');
+  $('failTitle').textContent = payload.title;
+  $('failMessage').textContent = payload.message;
+  $('failDetail').textContent = payload.diagnostics || '';
+  $('failDetail').hidden = !payload.diagnostics;
+  $('retry').hidden = !payload.retryable;
+});
+
+$('start').onclick = () => {
+  $('start').disabled = true;
+  show('progress');
+  invoke('start_setup');
+};
+
+$('retry').onclick = () => {
+  show('progress');
+  $('detail').textContent = '';
+  $('fill').style.width = '0%';
+  invoke('start_setup');
+};
+
+$('copy').onclick = async () => {
+  await navigator.clipboard.writeText(await invoke('copy_diagnostics'));
+  $('copy').textContent = 'Copied';
+  setTimeout(() => { $('copy').textContent = 'Copy diagnostics'; }, 2000);
+};
+
+$('logs').onclick = () => invoke('open_log_folder');
+
+// The last resort: an engine that installed cleanly and is broken anyway. The
+// stamp cannot detect that, so it takes a person deciding.
+$('reinstall').onclick = () => {
+  show('progress');
+  $('progressTitle').textContent = 'Reinstalling the engine';
+  $('detail').textContent = '';
+  $('fill').style.width = '0%';
+  invoke('reinstall_engine');
+};
+
+async function boot() {
+  const state = await invoke('initial_state');
+  if (state.unsupported) {
+    show('failure');
+    $('failTitle').textContent = 'This machine is not supported';
+    $('failMessage').textContent = state.unsupported;
+    $('failDetail').hidden = true;
+    $('retry').hidden = true;
+    return;
+  }
+  if (state.needsSetup) {
+    $('engineSize').textContent = state.engineSize;
+    show('welcome');
+    return;
+  }
+  // Nothing to install: go straight through, with a splash while the child
+  // imports torch. That import is genuinely slow, and a blank window for
+  // twenty seconds reads as a hang.
+  show('progress');
+  $('progressTitle').textContent = 'Starting local-img';
+  $('progressBody').textContent = 'Loading the engine.';
+  invoke('start_setup');
+}
+
+boot();
 </script>
 </body>
 </html>

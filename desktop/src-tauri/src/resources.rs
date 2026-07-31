@@ -28,6 +28,10 @@ pub const PYTHON_FILES: &[&str] = &[
 /// Resolved from `CARGO_MANIFEST_DIR` so it is correct in `build.rs`, in
 /// `cargo test`, and in `cargo run` alike. It is deliberately *not* how the
 /// installed app finds its files — that goes through the resource directory.
+// Dead from the binary's point of view and deliberately kept: build.rs pulls
+// this file in with `include!` and calls it to copy the resources, and the
+// tests below use it. Deleting it would break the build script.
+#[allow(dead_code)]
 pub fn repo_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")

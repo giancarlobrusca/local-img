@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 pub struct Layout {
     pub data_dir: PathBuf,
     pub runtime_dir: PathBuf,
-    pub python_root: PathBuf,
     pub interpreter: PathBuf,
     pub site_packages: PathBuf,
     pub logs_dir: PathBuf,
@@ -45,7 +44,6 @@ impl Layout {
         Self {
             data_dir: data_dir.to_path_buf(),
             runtime_dir,
-            python_root,
             interpreter,
             site_packages,
             logs_dir: data_dir.join("logs"),
@@ -63,7 +61,7 @@ mod tests {
     #[test]
     fn everything_sits_under_the_data_directory() {
         let l = Layout::new(Path::new("/data"));
-        for path in [&l.runtime_dir, &l.python_root, &l.interpreter,
+        for path in [&l.runtime_dir, &l.interpreter,
                      &l.site_packages, &l.logs_dir, &l.stamp_path, &l.archive_path] {
             assert!(path.starts_with("/data"), "escaped: {}", path.display());
         }
@@ -83,7 +81,9 @@ mod tests {
         // python-build-standalone's install_only archives all have a single
         // top-level `python/` entry.
         let l = Layout::new(Path::new("/data"));
-        assert_eq!(l.python_root, l.runtime_dir.join("python"));
+        let python_root = l.runtime_dir.join("python");
+        assert!(l.interpreter.starts_with(&python_root));
+        assert!(l.site_packages.starts_with(&python_root));
     }
 
     #[cfg(unix)]

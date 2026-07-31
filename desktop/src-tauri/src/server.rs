@@ -67,7 +67,6 @@ pub struct Server {
     pub port: u16,
     pub token: String,
     tail: Tail,
-    pub log_path: PathBuf,
 }
 
 /// Ask the OS for a port nobody is using.
@@ -288,7 +287,7 @@ fn spawn_once(
         tee(stderr, tail.clone(), log_path.clone());
     }
 
-    let mut server = Server { child, port, token, tail, log_path };
+    let mut server = Server { child, port, token, tail };
 
     match wait_healthy(&mut server) {
         Ok(()) => Ok(server),
