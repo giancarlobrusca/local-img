@@ -13,11 +13,45 @@ here, never an inference API.
 ![The local-img UI: prompt and model settings on the left, the selected render with its
 parameters in the middle, and the local history along the bottom](docs/screenshot.png)
 
+## Download the app
+
+The quickest way in: one file, no terminal, no Python.
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `.dmg` |
+| Windows 10/11 (64-bit) | `.msi` |
+| Linux (64-bit) | `.AppImage` or `.deb` |
+
+**[Download the latest release →](https://github.com/giancarlobrusca/local-img/releases/latest)**
+
+On first launch the app downloads its own Python engine (about 1 GB), measures
+your machine, recommends a model that fits, and asks before downloading it.
+Everything after that is offline. Images are saved to `Pictures/local-img`.
+
+Intel Macs are not supported: without Metal every image would be generated on
+the CPU, which the [CPU note](#requirements) below explains is impractical
+rather than merely slow.
+
+### The security prompt
+
+The builds are **not signed** — code signing certificates cost money per year,
+and this is a free tool. Both systems will warn you, once:
+
+- **macOS** — "local-img cannot be opened because the developer cannot be
+  verified." Right-click the app in Applications, choose **Open**, then
+  **Open** again in the dialog. macOS remembers the choice.
+- **Windows** — "Windows protected your PC." Click **More info**, then
+  **Run anyway**.
+
+If you would rather not click through that, the source install below builds
+everything on your own machine.
+
 ## Requirements
 
 | | |
 |---|---|
-| Python | 3.11 or 3.12 (PyTorch has no 3.13/3.14 wheels) |
+| Python | 3.11 or 3.12, **for the source install only** — the app brings its own |
 | GPU | Apple Silicon (Metal/MPS) or NVIDIA (CUDA) |
 | Memory | A 4 GB GPU or 8 GB of unified memory gets SD 1.5; 16 GB gets every SDXL model; 36 GB+ gets the flux tier |
 | Disk | ~2-4 GB per SD 1.5 model, ~7 GB per SDXL model, 26-34 GB per flux model, plus ~2.5 GB of Python deps |
@@ -48,7 +82,10 @@ images with a model, the app switches to the median of your own recorded times
 and says so. The NVIDIA scaling factors are uncalibrated guesses until that
 happens — this project has no NVIDIA hardware to measure against.
 
-## Setup
+## From source
+
+The repo flow, unchanged: everything the desktop app does, done by hand, on any
+machine that already has Python 3.11 or 3.12.
 
 ```bash
 ./setup.sh                      # Python 3.12 venv + torch/diffusers (~2.5 GB, a few minutes)
@@ -160,10 +197,14 @@ to learn what a model responds to.
 app.py           FastAPI server — pipeline cache, job queue, SSE progress
 models.py        model registry (repo ids, defaults, sizes, fit requirements)
 hardware.py      machine detection, per-model fit rules, speed estimates
+paths.py         where the profile and the renders live, from two env vars
 download.py      resumable weight prefetch
-delete_test.py   offline checks for the delete route (no GPU work)
-hardware_test.py offline checks for detection, fit, estimates, routes (no GPU work)
+delete_test.py   offline checks for the delete route and the session gate
+hardware_test.py offline checks for detection, fit, estimates, routes
+paths_test.py    offline checks for path resolution in both modes
+shell_test.py    offline checks for the port and the parent watchdog
 web/index.html   the entire UI, no build step
+desktop/         the Tauri shell — bootstraps Python, runs app.py, no clone needed
 outputs/         generated PNGs + parameter sidecars (gitignored)
 .local-img/      the detected hardware profile (gitignored)
 ```
@@ -182,6 +223,9 @@ outputs/         generated PNGs + parameter sidecars (gitignored)
 - Adding a model is a new entry in `models.py`, as long as the repo is in
   diffusers format (has a `model_index.json`) and is SD 1.5, SDXL, or flux
   architecture.
+- **The app and the repo share their weights.** Both use `~/.cache/huggingface`,
+  so installing the app after using the source flow re-downloads nothing. The
+  app keeps its own hardware profile and puts renders in `Pictures/local-img`.
 
 ## Don't deploy this
 

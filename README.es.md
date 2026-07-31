@@ -13,11 +13,46 @@ servidor de archivos, nunca una API de inferencia.
 ![La interfaz de local-img: prompt y configuración del modelo a la izquierda, el render
 seleccionado con sus parámetros en el centro, y el historial local abajo](docs/screenshot.png)
 
+## Descargar la app
+
+La vía rápida: un archivo, sin terminal y sin Python.
+
+| Plataforma | Archivo |
+|---|---|
+| macOS (Apple Silicon) | `.dmg` |
+| Windows 10/11 (64 bits) | `.msi` |
+| Linux (64 bits) | `.AppImage` o `.deb` |
+
+**[Descargar la última versión →](https://github.com/giancarlobrusca/local-img/releases/latest)**
+
+En el primer arranque la app descarga su propio motor de Python (alrededor de
+1 GB), mide la máquina, recomienda un modelo que entre y pregunta antes de
+descargarlo. De ahí en adelante funciona sin conexión. Las imágenes se guardan
+en `Pictures/local-img`.
+
+Las Mac con Intel no están soportadas: sin Metal cada imagen se generaría en la
+CPU, que como explica la [nota sobre CPU](#requisitos) más abajo no es lento
+sino impracticable.
+
+### El aviso de seguridad
+
+Los builds **no están firmados** — los certificados de firma cuestan dinero por
+año y esto es una herramienta gratuita. Los dos sistemas avisan, una vez:
+
+- **macOS** — "no se puede abrir local-img porque no se puede verificar al
+  desarrollador". Click derecho sobre la app en Aplicaciones, **Abrir**, y
+  **Abrir** otra vez en el diálogo. macOS se acuerda de la decisión.
+- **Windows** — "Windows protegió su PC". Click en **Más información** y
+  después en **Ejecutar de todas formas**.
+
+Si preferís no pasar por eso, la instalación desde el código de abajo compila
+todo en tu propia máquina.
+
 ## Requisitos
 
 | | |
 |---|---|
-| Python | 3.11 o 3.12 (PyTorch no publica wheels para 3.13/3.14) |
+| Python | 3.11 o 3.12, **solo para la instalación desde el código** — la app trae el suyo |
 | GPU | Apple Silicon (Metal/MPS) o NVIDIA (CUDA) |
 | Memoria | Una GPU de 4 GB u 8 GB de memoria unificada alcanzan para SD 1.5; 16 GB para todos los modelos SDXL; 36 GB o más para la capa flux |
 | Disco | ~2-4 GB por modelo SD 1.5, ~7 GB por modelo SDXL, 26-34 GB por modelo flux, más ~2.5 GB de dependencias de Python |
@@ -52,7 +87,10 @@ tus propios tiempos registrados y lo aclara. Los factores de escalado para NVIDI
 son estimaciones sin calibrar hasta que eso ocurre — este proyecto no tiene
 hardware NVIDIA contra el cual medir.
 
-## Instalación
+## Desde el código
+
+El flujo del repositorio, sin cambios: todo lo que hace la app de escritorio,
+hecho a mano, en cualquier máquina que ya tenga Python 3.11 o 3.12.
 
 ```bash
 ./setup.sh                      # venv de Python 3.12 + torch/diffusers (~2.5 GB, unos minutos)
@@ -171,10 +209,14 @@ rápida de entender a qué responde un modelo.
 app.py           servidor FastAPI — caché de pipelines, cola de trabajos, progreso por SSE
 models.py        registro de modelos (repos, valores por defecto, tamaños, requisitos)
 hardware.py      detección de la máquina, reglas de compatibilidad, estimaciones de tiempo
+paths.py         dónde viven el perfil y los renders, a partir de dos variables de entorno
 download.py      descarga previa de pesos, reanudable
-delete_test.py   chequeos offline de la ruta de borrado (sin trabajo de GPU)
-hardware_test.py chequeos offline de detección, fit, estimaciones y rutas (sin GPU)
+delete_test.py   chequeos offline de la ruta de borrado y de la sesión
+hardware_test.py chequeos offline de detección, fit, estimaciones y rutas
+paths_test.py    chequeos offline de la resolución de rutas en los dos modos
+shell_test.py    chequeos offline del puerto y del watchdog del proceso padre
 web/index.html   toda la interfaz, sin paso de build
+desktop/         el shell Tauri — instala Python, corre app.py, sin clonar nada
 outputs/         PNGs generados + sus archivos de parámetros (ignorados por git)
 .local-img/      el perfil de hardware detectado (ignorado por git)
 ```
@@ -195,6 +237,10 @@ outputs/         PNGs generados + sus archivos de parámetros (ignorados por git
 - Agregar un modelo es una entrada nueva en `models.py`, siempre que el repo esté
   en formato diffusers (tenga un `model_index.json`) y sea arquitectura SD 1.5,
   SDXL o flux.
+- **La app y el repositorio comparten los pesos.** Los dos usan
+  `~/.cache/huggingface`, así que instalar la app después de haber usado el
+  flujo del código no vuelve a descargar nada. La app guarda su propio perfil
+  de hardware y pone los renders en `Pictures/local-img`.
 
 ## No despliegues esto
 
