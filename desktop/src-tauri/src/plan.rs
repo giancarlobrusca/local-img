@@ -34,8 +34,7 @@ pub const CPU_INDEX: &str = "https://download.pytorch.org/whl/cpu";
 /// Measured by `--bootstrap-only` on an M-series Mac: 922,053,753 bytes of
 /// site-packages after torch and requirements.txt install from PyPI. Rounded
 /// up, because a bar that reaches 99 slightly late reads better than one that
-/// sits there. Wrong by 20% costs a bar that moves unevenly; wrong by an order
-/// of magnitude costs a bar that looks stuck.
+/// sits there.
 const SITE_PACKAGES_MACOS: u64 = 925_000_000;
 /// Not yet measured: only the CI smoke job's Windows and Ubuntu jobs can
 /// measure this, and neither has run yet. Take the larger of the two the

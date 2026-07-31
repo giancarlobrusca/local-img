@@ -43,13 +43,19 @@ pub fn bootstrap_only() -> i32 {
     // argv as `resources.join("app.py")`. A relative --resources (exactly
     // what CI passes: "../..") would then be applied twice — once by the
     // chdir, once again when the child resolves its own argv against its
-    // *new* cwd — landing two directories short of app.py. Canonicalizing
-    // once here, before anything downstream sees it, is the fix that does
-    // not touch server.rs's frozen contract.
-    let resources = match args.resources.canonicalize() {
-        Ok(path) => path,
+    // *new* cwd — landing two directories short of app.py. Resolving it to
+    // an absolute path once here, before anything downstream sees it, is the
+    // fix that does not touch server.rs's frozen contract.
+    //
+    // Resolve relative to the current directory rather than canonicalizing.
+    // Path::canonicalize returns a \\?\C:\… verbatim path on Windows, which
+    // then reaches CreateProcessW's working directory and the child's argv.
+    // Whether CPython accepts that is precisely what this job exists to find
+    // out — it should not be a variable inside the check itself.
+    let resources = match std::env::current_dir() {
+        Ok(cwd) => cwd.join(&args.resources),
         Err(e) => {
-            eprintln!("--resources {}: {e}", args.resources.display());
+            eprintln!("could not resolve the working directory: {e}");
             return 2;
         }
     };
@@ -91,7 +97,7 @@ pub fn bootstrap_only() -> i32 {
     );
 
     let outputs = args.data_dir.join("outputs");
-    let mut server = match crate::server::start(&layout, &resources, &outputs) {
+    let server = match crate::server::start(&layout, &resources, &outputs) {
         Ok(server) => server,
         Err(e) => {
             eprintln!("server failed: {} \n{}", e.message, e.diagnostics);
@@ -101,7 +107,6 @@ pub fn bootstrap_only() -> i32 {
     println!("server answered on port {}", server.port);
 
     let code = check_routes(&server);
-    let _ = server.is_alive();
     server.shutdown();
     code
 }
@@ -139,10 +144,18 @@ fn check_routes(server: &crate::server::Server) -> i32 {
         ),
     ] {
         match client.get(&url).call() {
-            Err(_) => println!("gate: ok ({label} is refused)"),
+            // ureq surfaces a status code as an error; a refused connection or
+            // a timeout arrives the same way, so they have to be told apart.
+            // Treating any Err as "refused" would let this probe pass against
+            // a server that had already died.
+            Err(ureq::Error::StatusCode(403)) => println!("gate: ok ({label} gets 403)"),
             Ok(r) if r.status() == 403 => println!("gate: ok ({label} gets 403)"),
             Ok(r) => {
                 eprintln!("gate: FAILED — {label} got {}", r.status());
+                return 1;
+            }
+            Err(e) => {
+                eprintln!("gate: FAILED — {label} could not be probed at all: {e}");
                 return 1;
             }
         }

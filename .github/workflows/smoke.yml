@@ -9,7 +9,7 @@ on:
 jobs:
   python:
     name: python checks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,10 +29,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-22.04 rather than the newest: glibc and webkit from the
-        # oldest release supported, so the AppImage runs on more than the
-        # distribution it was built on.
-        os: [macos-14, windows-latest, ubuntu-22.04]
+        # 24.04 rather than 22.04: 22.04 begins deprecation brownouts on
+        # 2026-09-17 that deliberately fail jobs. This job ships nothing, so
+        # it has no reason to pin an older glibc — that argument belongs to
+        # release.yml, which does build an AppImage.
+        os: [macos-14, windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -63,7 +64,7 @@ jobs:
     # the CUDA path is deliberately being revisited.
     name: cuda wheels install
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
