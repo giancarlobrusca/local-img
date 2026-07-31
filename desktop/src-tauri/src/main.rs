@@ -12,6 +12,7 @@ mod plan;
 mod proc;
 mod progress;
 mod resources;
+mod server;
 mod stamp;
 
 fn main() {
