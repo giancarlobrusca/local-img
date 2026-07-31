@@ -33,11 +33,14 @@ from pydantic import BaseModel, Field
 
 import download
 import hardware
+import paths
 from models import BY_KEY, DEFAULT_MODEL, MODELS
 
 ROOT = Path(__file__).parent
-OUTPUTS = ROOT / "outputs"
-OUTPUTS.mkdir(exist_ok=True)
+OUTPUTS = paths.outputs_dir()
+# parents=True: in app mode this is ~/Pictures/local-img, whose parent exists,
+# but a user-supplied LOCAL_IMG_OUTPUTS may be nested arbitrarily deep.
+OUTPUTS.mkdir(parents=True, exist_ok=True)
 
 def _pick_device() -> str:
     """CUDA, then Apple Metal, then CPU. Override with LOCAL_IMG_DEVICE."""
@@ -427,7 +430,7 @@ def _watch_download(job: Job, spec, stop: threading.Event):
 def run_download(job: Job, spec):
     stop = threading.Event()
     try:
-        free_gb = shutil.disk_usage(ROOT).free / 1e9
+        free_gb = shutil.disk_usage(paths.disk_probe_dir()).free / 1e9
         problem = disk_shortfall(spec, free_gb)
         if problem:
             # Fail before transferring anything rather than filling the disk.

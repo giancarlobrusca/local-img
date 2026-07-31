@@ -22,11 +22,15 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+import paths
 
 # Bumping this invalidates every stored profile and forces a re-scan.
 SCHEMA_VERSION = 1
-PROFILE_PATH = ROOT / ".local-img" / "profile.json"
+
+
+def profile_path() -> Path:
+    """Re-exported so callers keep asking hardware.py where its own file is."""
+    return paths.profile_path()
 
 REFERENCE_GPU_CORES = 16   # M1 Pro — perf_factor 1.0
 CPU_PERF_FACTOR = 0.04
@@ -167,7 +171,7 @@ def derive_tier(profile: HardwareProfile, specs) -> str:
 # ------------------------------------------------------------- persistence ---
 
 def save(profile: HardwareProfile, path=None) -> Path:
-    path = Path(path or PROFILE_PATH)
+    path = Path(path or profile_path())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(profile), indent=2), encoding="utf-8")
     return path
@@ -180,7 +184,7 @@ def load(path=None) -> HardwareProfile | None:
     no longer matches the dataclass all return None — which the UI reads as
     "never scanned" and turns into the first-run wizard.
     """
-    path = Path(path or PROFILE_PATH)
+    path = Path(path or profile_path())
     if not path.exists():
         return None
     try:
@@ -345,7 +349,12 @@ def detect(device: str, specs=None) -> HardwareProfile:
             total_ram_gb * CPU_BUDGET_FRACTION,
             flags,
         )
-        free_disk_gb = _try(lambda: _gb(shutil.disk_usage(ROOT).free), 0.0, flags)
+        # Weights land in the Hugging Face cache under home, which installed is
+        # a different volume from the app bundle. Measure the volume that has to
+        # hold them, not the one holding the code.
+        free_disk_gb = _try(
+            lambda: _gb(shutil.disk_usage(paths.disk_probe_dir()).free), 0.0, flags
+        )
 
         profile = HardwareProfile(
             schema_version=SCHEMA_VERSION,

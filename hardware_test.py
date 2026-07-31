@@ -460,42 +460,52 @@ def test_read_history_on_a_missing_directory():
 # ------------------------------------------------------------------ routes ---
 
 def _client_with_temp_profile():
-    """A TestClient whose profile path points at a zz- fixture.
+    """A TestClient whose profile path points at a zz- fixture directory.
 
-    hardware.load() and save() read PROFILE_PATH at call time, so patching the
-    module global after import is enough — the developer's real
-    .local-img/profile.json is never read or written. Returns a `restore`
-    callable so callers can put the module global back in their own `finally`,
-    matching the monkeypatch/restore pattern used elsewhere in this file (see
-    test_detect_survives_broken_system_calls).
+    paths.profile_path() reads LOCAL_IMG_DATA_DIR at call time, so setting the
+    variable is enough — the developer's real .local-img/profile.json is never
+    read or written. Returns a `restore` callable so callers can put the
+    environment back in their own `finally`, matching the monkeypatch/restore
+    pattern used elsewhere in this file.
     """
+    import os
+    import shutil as shutil_mod
+
     from fastapi.testclient import TestClient
-    import hardware
     import app as app_module
 
-    tmp = ROOT / f"{PREFIX}route-profile.json"
-    tmp.unlink(missing_ok=True)
-    created.append(tmp)
-    real_path = hardware.PROFILE_PATH
-    hardware.PROFILE_PATH = tmp
+    data_dir = ROOT / f"{PREFIX}route-data"
+    shutil_mod.rmtree(data_dir, ignore_errors=True)
+    had = "LOCAL_IMG_DATA_DIR" in os.environ
+    previous = os.environ.get("LOCAL_IMG_DATA_DIR")
+    os.environ["LOCAL_IMG_DATA_DIR"] = str(data_dir)
 
     def restore():
-        hardware.PROFILE_PATH = real_path
+        if had:
+            os.environ["LOCAL_IMG_DATA_DIR"] = previous
+        else:
+            os.environ.pop("LOCAL_IMG_DATA_DIR", None)
+        shutil_mod.rmtree(data_dir, ignore_errors=True)
 
-    return TestClient(app_module.app), tmp, restore
+    return TestClient(app_module.app), data_dir / "profile.json", restore
 
 
-def test_temp_profile_helper_restores_the_global():
+def test_temp_profile_helper_restores_the_environment():
+    import os
+
     import hardware
 
-    real_path = hardware.PROFILE_PATH
+    real_path = hardware.profile_path()
     _client, tmp, restore = _client_with_temp_profile()
     try:
-        check("the global is patched to the fixture while in use",
-              hardware.PROFILE_PATH == tmp)
+        check("the profile path follows the fixture while in use",
+              hardware.profile_path() == tmp)
+        check("the variable is set while in use",
+              "LOCAL_IMG_DATA_DIR" in os.environ)
     finally:
         restore()
-    check("PROFILE_PATH was restored", hardware.PROFILE_PATH == real_path)
+    check("the profile path was restored", hardware.profile_path() == real_path)
+    check("the fixture directory is gone", not tmp.parent.exists())
 
 
 def test_page_is_read_as_utf8_whatever_the_locale():
