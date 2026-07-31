@@ -138,8 +138,9 @@ not fit.
 
 Left panel: prompt, model, negative prompt, and a Settings drawer for steps,
 guidance, dimensions, image count, and seed. Selecting a model loads its
-recommended defaults, and the image count caps at what the measured memory
-supports. `Cmd+Enter` in the prompt box generates.
+recommended defaults, and the image count is capped from the measured memory.
+Images are rendered one at a time, so the cap limits how many renders you queue,
+not how much memory a render needs. `Cmd+Enter` in the prompt box generates.
 
 The status bar streams live per-step progress over SSE — useful since a 30-step
 SDXL render takes a couple of minutes. Generated images land in `outputs/` as PNG
@@ -178,7 +179,8 @@ outputs/         generated PNGs + parameter sidecars (gitignored)
   trained at ~1 megapixel — 1024×1024, 1152×896, 896×1152 behave best; pushing
   past ~1536 on either axis produces duplicated subjects and risks OOM.
 - Adding a model is a new entry in `models.py`, as long as the repo is in
-  diffusers format (has a `model_index.json`) and is SD 1.5 or SDXL architecture.
+  diffusers format (has a `model_index.json`) and is SD 1.5, SDXL, or flux
+  architecture.
 
 ## Don't deploy this
 

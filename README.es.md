@@ -148,7 +148,9 @@ que muestra los modelos que no entran.
 Panel izquierdo: prompt, modelo, prompt negativo y un desplegable de Settings con
 pasos, guidance, dimensiones, cantidad de imágenes y seed. Al elegir un modelo se
 cargan sus valores por defecto recomendados, y la cantidad de imágenes queda
-limitada por la memoria medida. `Cmd+Enter` en el campo de prompt genera.
+limitada según la memoria medida. Las imágenes se generan de a una, así que el
+tope limita cuántos renders encolás, no cuánta memoria necesita cada uno.
+`Cmd+Enter` en el campo de prompt genera.
 
 La barra de estado transmite el progreso paso a paso en vivo por SSE — útil,
 porque un render SDXL de 30 pasos tarda un par de minutos. Las imágenes generadas
@@ -190,7 +192,8 @@ outputs/         PNGs generados + sus archivos de parámetros (ignorados por git
   que mejor se comportan; pasar de ~1536 en cualquier eje produce sujetos
   duplicados y arriesga un OOM.
 - Agregar un modelo es una entrada nueva en `models.py`, siempre que el repo esté
-  en formato diffusers (tenga un `model_index.json`) y sea arquitectura SD 1.5 o SDXL.
+  en formato diffusers (tenga un `model_index.json`) y sea arquitectura SD 1.5,
+  SDXL o flux.
 
 ## No despliegues esto
 
