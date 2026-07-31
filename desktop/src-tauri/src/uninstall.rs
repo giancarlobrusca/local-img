@@ -19,9 +19,6 @@ use std::path::{Path, PathBuf};
 /// say which file it was. What this needs instead is for one locked file to
 /// cost exactly that file, and for the summary afterwards to name it — nothing
 /// here pretends to a success it did not have.
-// Dead from this crate's point of view until Task 5 wires it into a Tauri
-// command; the tests below are its only caller for now.
-#[allow(dead_code)]
 pub fn remove_data_dir(data_dir: &Path) -> Vec<String> {
     let mut resisted = Vec::new();
     if std::fs::symlink_metadata(data_dir).is_err() {
@@ -61,10 +58,8 @@ fn remove_tree(path: &Path, resisted: &mut Vec<String>) {
 }
 
 /// The folder the user has to remove the app itself from.
-// Dead from this crate's point of view until Task 5 wires it into a Tauri
-// command; no test here calls the impure half either, since current_exe()
-// only reflects the test binary. app_folder_from below carries the coverage.
-#[allow(dead_code)]
+// No test here calls the impure half either, since current_exe() only
+// reflects the test binary. app_folder_from below carries the coverage.
 pub fn app_folder() -> PathBuf {
     app_folder_from(&std::env::current_exe().unwrap_or_default())
 }

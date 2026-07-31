@@ -10,6 +10,8 @@ use serde::Serialize;
 pub const PROGRESS: &str = "shell://progress";
 /// Something went wrong and the failure screen should take over.
 pub const FAILED: &str = "shell://failed";
+/// The uninstall finished and the removed screen should take over.
+pub const REMOVED: &str = "shell://removed";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,4 +46,23 @@ pub struct Failure {
 pub struct UpdateInfo {
     pub version: String,
     pub url: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Removed {
+    /// The total, already formatted: "23.4 GB". Composed from what Python
+    /// reported and what the shell measured, never from either alone.
+    pub freed: String,
+    /// Absolute paths that could not be deleted. Empty on a clean run, and
+    /// shown verbatim when it is not — a summary claiming 23 GB when it freed
+    /// 19 is worse than no button at all.
+    pub resisted: Vec<String>,
+    /// The data directory, named on screen when something resisted so the user
+    /// can go and look.
+    pub data_dir: String,
+    /// The one thing left to do, in words that match this platform.
+    pub last_step: String,
+    /// The label of the button that opens where that happens.
+    pub open_label: String,
 }

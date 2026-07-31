@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-page",
+  "description": "The page the Python server hosts may finish an uninstall the user has already confirmed. One command, no plugins, no core API — the served page gaining IPC at all is the concession; it does not also get everything else.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": ["allow-finish-uninstall"]
+}

@@ -1,7 +1,20 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the first-run window may do",
+  "description": "What the shell's own window may do. Every command is listed because declaring an app ACL manifest makes an ungranted command a runtime rejection.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "opener:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "opener:default",
+    "allow-initial-state",
+    "allow-start-setup",
+    "allow-reinstall-engine",
+    "allow-copy-diagnostics",
+    "allow-open-log-folder",
+    "allow-finish-uninstall",
+    "allow-open-app-location",
+    "allow-open-data-dir",
+    "allow-quit-app"
+  ]
 }

@@ -5,7 +5,14 @@
 //! bundler to reach outside its own project directory, which it handles
 //! inconsistently across the three target platforms. Copying first makes the
 //! resource paths boring and identical everywhere.
+//!
+//! It also declares the app's ACL manifest, which is what lets a capability
+//! grant one of this crate's own commands to the page the Python server hosts.
+//! Note the consequence: once an app manifest exists, every command needs a
+//! grant, including from the shell's own window. `src/commands.rs` holds the
+//! list and its tests hold the two capability files to it.
 
+include!("src/commands.rs");
 include!("src/resources.rs");
 
 fn main() {
@@ -18,5 +25,11 @@ fn main() {
             .unwrap_or_else(|e| panic!("copy {} -> {}: {e}", from.display(), to.display()));
         println!("cargo:rerun-if-changed={}", from.display());
     }
-    tauri_build::build();
+    println!("cargo:rerun-if-changed=src/commands.rs");
+
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+    )
+    .expect("failed to run tauri-build");
 }

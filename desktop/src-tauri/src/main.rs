@@ -3,6 +3,7 @@
 
 mod bootstrap;
 mod cli;
+mod commands;
 mod events;
 mod layout;
 mod plan;
@@ -32,6 +33,12 @@ struct Shell {
     /// Set while a shutdown the user already approved is in progress, so the
     /// close handler does not ask a second time.
     closing: Mutex<bool>,
+    /// Set the moment an uninstall starts, so a window that navigates back to
+    /// the shell's own page mid-deletion shows the removal screen rather than
+    /// offering to set the app up again.
+    uninstalling: Mutex<bool>,
+    /// The result, once there is one.
+    removed: Mutex<Option<events::Removed>>,
 }
 
 #[derive(Serialize)]
@@ -44,15 +51,25 @@ struct InitialState {
     /// Set when the platform itself is the problem; the welcome screen turns
     /// into the failure screen and the button never appears.
     unsupported: Option<String>,
+    /// True from the moment finish_uninstall is called until it is done. The
+    /// page reads this because it may well load while the deletion is running.
+    uninstalling: bool,
+    /// Present once the uninstall has finished. Takes precedence over every
+    /// other field: there is nothing left to set up.
+    removed: Option<events::Removed>,
 }
 
 #[tauri::command]
 fn initial_state(shell: State<'_, Shell>) -> InitialState {
+    let uninstalling = *shell.uninstalling.lock().unwrap_or_else(|e| e.into_inner());
+    let removed = shell.removed.lock().unwrap_or_else(|e| e.into_inner()).clone();
     match &shell.plan {
         Err(reason) => InitialState {
             needs_setup: false,
             engine_size: String::new(),
             unsupported: Some(reason.clone()),
+            uninstalling,
+            removed,
         },
         Ok(plan) => {
             let requirements = shell.resources.join("requirements.txt");
@@ -62,6 +79,8 @@ fn initial_state(shell: State<'_, Shell>) -> InitialState {
                 needs_setup: stamp::needs_bootstrap(&shell.layout, &expected),
                 engine_size: progress::human_gb(plan.total_download_bytes()),
                 unsupported: None,
+                uninstalling,
+                removed,
             }
         }
     }
@@ -252,6 +271,151 @@ fn reinstall_engine(app: AppHandle, window: WebviewWindow) {
     start_setup(app, window);
 }
 
+/// The app's own page, which is `tauri://localhost` on macOS and Linux and
+/// `http://tauri.localhost` on Windows — the same split `on_navigation` below
+/// already has to know about. `useHttpsScheme` is not set in tauri.conf.json,
+/// so the Windows scheme is http.
+fn local_index_url() -> &'static str {
+    #[cfg(windows)]
+    {
+        "http://tauri.localhost/index.html"
+    }
+    #[cfg(not(windows))]
+    {
+        "tauri://localhost/index.html"
+    }
+}
+
+/// What is left to do once the data directory is gone, per platform.
+///
+/// The app bundle itself is out of scope: self-deletion needs a helper process
+/// that outlives the app on macOS and Linux, for the last 10 MB of 25 GB.
+fn last_step() -> (String, String) {
+    #[cfg(target_os = "macos")]
+    {
+        (
+            "All that's left is to drag local-img from Applications to the Trash.".into(),
+            "Open the Applications folder".into(),
+        )
+    }
+    #[cfg(windows)]
+    {
+        (
+            "All that's left is to remove local-img in Apps & features.".into(),
+            "Open Apps & features".into(),
+        )
+    }
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
+    {
+        (
+            "All that's left is to delete the AppImage — or, if you installed the \
+             .deb, to run: sudo apt remove local-img"
+                .into(),
+            "Open the folder it is in".into(),
+        )
+    }
+}
+
+/// The shell half of an uninstall the user has already confirmed.
+///
+/// Python has deleted the weights, the chunk cache, and — if the box was ticked
+/// — the renders, and passes what it freed. It cannot take the last step: it is
+/// running from inside `data_dir/runtime`, and Windows does not let a process
+/// unlink a file it holds open.
+///
+/// Every intermediate state here is a valid state, which is why none of this
+/// needs a transaction. Interrupted after Python's half: weights gone, runtime
+/// present, and the app starts and offers to download a model. Interrupted with
+/// the data directory half-deleted: the stamp is gone, so the next launch
+/// rebuilds from scratch — precisely what `reinstall_engine` already does.
+#[tauri::command]
+fn finish_uninstall(app: AppHandle, window: WebviewWindow, freed: u64) {
+    {
+        let shell = app.state::<Shell>();
+        // Nothing may start the server again, and the close handler must not
+        // ask about a render on a server that is about to stop existing.
+        *shell.closing.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        *shell.uninstalling.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    }
+
+    // Back to the shell's own page before anything is deleted. The page Python
+    // served is about to lose its server, and removing a 7 GB runtime takes
+    // long enough that doing it first would leave a dead window on screen.
+    let _ = window.navigate(
+        local_index_url()
+            .parse()
+            .expect("a URL compiled into the binary"),
+    );
+
+    // On a thread for the same reason `start_setup` is: everything below
+    // blocks, and the webview has a screen to draw.
+    std::thread::spawn(move || {
+        let shell = app.state::<Shell>();
+        if let Ok(mut slot) = shell.server.lock() {
+            if let Some(server) = slot.take() {
+                server.shutdown();
+            }
+        }
+
+        // Measured either side rather than trusted: the total on screen has to
+        // be what came off the disk, including when part of it would not go.
+        let before = progress::dir_size(&shell.layout.data_dir);
+        let resisted = uninstall::remove_data_dir(&shell.layout.data_dir);
+        let after = progress::dir_size(&shell.layout.data_dir);
+
+        let (last_step, open_label) = last_step();
+        let removed = events::Removed {
+            freed: progress::human_gb(freed.saturating_add(before.saturating_sub(after))),
+            resisted,
+            data_dir: shell.layout.data_dir.display().to_string(),
+            last_step,
+            open_label,
+        };
+
+        *shell.removed.lock().unwrap_or_else(|e| e.into_inner()) = Some(removed.clone());
+        *shell.uninstalling.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        // The page may have finished loading before or after this point; it
+        // reads `initial_state` on boot as well, so whichever happens second wins.
+        let _ = app.emit(events::REMOVED, removed);
+    });
+}
+
+/// Open the place the app itself has to be removed from.
+#[tauri::command]
+fn open_app_location(app: AppHandle) {
+    #[cfg(windows)]
+    {
+        // An .msi install is removed in Apps & features, not by dragging a
+        // folder, so this opens the settings page rather than a directory.
+        let _ = app.opener().open_url("ms-settings:appsfeatures", None::<&str>);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app.opener().open_path(
+            uninstall::app_folder().to_string_lossy().to_string(),
+            None::<&str>,
+        );
+    }
+}
+
+/// Open the data directory, for the case where part of it would not delete.
+///
+/// Beside `open_log_folder`, which points one level deeper. The removed card
+/// shows this button only when something resisted — it exists so the user can
+/// go and look at the exact files named on that screen.
+#[tauri::command]
+fn open_data_dir(app: AppHandle, shell: State<'_, Shell>) {
+    let _ = app.opener().open_path(
+        shell.layout.data_dir.to_string_lossy().to_string(),
+        None::<&str>,
+    );
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 fn main() {
     // Handled before Tauri exists, and this is not a convenience: a Linux CI
     // runner has no display, so constructing the webview would fail long
@@ -276,7 +440,11 @@ fn main() {
             start_setup,
             reinstall_engine,
             copy_diagnostics,
-            open_log_folder
+            open_log_folder,
+            finish_uninstall,
+            open_app_location,
+            open_data_dir,
+            quit_app
         ])
         .setup(|app| {
             // local_data_dir is exactly the spec's three paths, without the
@@ -297,6 +465,8 @@ fn main() {
                 plan: plan::current(),
                 server: Mutex::new(None),
                 closing: Mutex::new(false),
+                uninstalling: Mutex::new(false),
+                removed: Mutex::new(None),
             });
 
             let handle = app.handle().clone();
