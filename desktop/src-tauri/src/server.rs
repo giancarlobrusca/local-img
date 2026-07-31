@@ -102,7 +102,9 @@ pub fn handoff_url(port: u16, token: &str, firstrun: bool) -> String {
 /// answers would otherwise block `wait_healthy` indefinitely — its own
 /// deadline is only checked *between* attempts, never during one — and would
 /// freeze the close-confirmation prompt while the user is trying to quit.
-fn poll_agent() -> ureq::Agent {
+/// Also used by `update::check`: the release call wants a bound, not the
+/// unbounded agent a 111 MB download needs.
+pub(crate) fn poll_agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(5)))
         .build()
@@ -125,6 +127,30 @@ pub fn rotate_log(path: &Path, max_bytes: u64) {
     let _ = std::fs::rename(path, &rotated);
 }
 
+/// Whether a render is in flight, so the shell can ask before closing.
+///
+/// A download is deliberately not counted: it resumes from the Hugging Face
+/// cache, where a four-minute flux render that has not written its PNG yet is
+/// simply lost.
+///
+/// A free function rather than a method on `Server`, so the close guard can
+/// copy the port and token out from under the mutex and release it before
+/// making the call — holding the lock across an HTTP request would block
+/// `copy_diagnostics` for as long as the timeout.
+pub fn is_generating_at(port: u16, token: &str) -> bool {
+    poll_agent()
+        .get(&format!("http://127.0.0.1:{port}/api/busy"))
+        // A header, not a query parameter. app.py accepts `?token=` on `/`
+        // alone, so the token never reaches a log, a Referer, or history.
+        .header(TOKEN_HEADER, token)
+        .call()
+        .ok()
+        .and_then(|mut r| r.body_mut().read_to_string().ok())
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+        .and_then(|v| v["generating"].as_bool())
+        .unwrap_or(false)
+}
+
 impl Server {
     pub fn url_with_token(&self, firstrun: bool) -> String {
         handoff_url(self.port, &self.token, firstrun)
@@ -132,25 +158,6 @@ impl Server {
 
     pub fn tail(&self) -> String {
         self.tail.text()
-    }
-
-    /// Whether a render is in flight, so the shell can ask before closing.
-    ///
-    /// A download is deliberately not counted: it resumes from the Hugging
-    /// Face cache, where a four-minute flux render that has not written its
-    /// PNG yet is simply lost.
-    pub fn is_generating(&self) -> bool {
-        poll_agent()
-            .get(&format!("http://127.0.0.1:{}/api/busy", self.port))
-            // A header, not a query parameter. app.py accepts `?token=` on `/`
-            // alone, so the token never reaches a log, a Referer, or history.
-            .header(TOKEN_HEADER, &self.token)
-            .call()
-            .ok()
-            .and_then(|mut r| r.body_mut().read_to_string().ok())
-            .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
-            .and_then(|v| v["generating"].as_bool())
-            .unwrap_or(false)
     }
 
     /// Whether the child is still running.

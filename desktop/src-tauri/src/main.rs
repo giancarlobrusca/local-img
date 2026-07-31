@@ -80,6 +80,17 @@ fn start_setup(app: AppHandle, window: WebviewWindow) {
 
 fn setup_and_hand_off(app: &AppHandle, window: &WebviewWindow) -> Result<(), events::Failure> {
     let shell = app.state::<Shell>();
+
+    // Any earlier server is finished with — a retry after a failed handoff,
+    // or a reinstall. Shut it down before starting another, or two Python
+    // children each holding a multi-GB pipeline overlap until the slot is
+    // overwritten.
+    if let Ok(mut slot) = shell.server.lock() {
+        if let Some(previous) = slot.take() {
+            previous.shutdown();
+        }
+    }
+
     let plan = shell.plan.as_ref().map_err(|reason| events::Failure {
         title: "This machine is not supported".into(),
         message: reason.clone(),
@@ -139,9 +150,13 @@ fn setup_and_hand_off(app: &AppHandle, window: &WebviewWindow) -> Result<(), eve
     // has its own reason to appear later (a missing profile), and it should
     // decide that for itself.
     let url = started.url_with_token(first_run);
-    if let Ok(mut slot) = shell.server.lock() {
-        *slot = Some(started);
-    }
+    // Not `if let Ok(..)`: on a poisoned lock that would skip the store, drop
+    // `started`, and Drop would kill the very child we are about to navigate
+    // to — silently. A poisoned slot still holds a perfectly good Option.
+    *shell
+        .server
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(started);
     window
         .navigate(url.parse().expect("a URL we just built"))
         .map_err(|e| events::Failure {
@@ -315,21 +330,31 @@ fn main() {
             let app = window.app_handle();
             let shell = app.state::<Shell>();
 
-            if *shell.closing.lock().unwrap() {
+            // A poisoned bool is still a perfectly good bool, and panicking
+            // here would take the event loop down with it.
+            if *shell.closing.lock().unwrap_or_else(|e| e.into_inner()) {
                 return;
             }
 
             // The image is written only when the render finishes, so closing
             // four minutes into a flux job loses it entirely.
-            let generating = shell
+            //
+            // Copy what the probe needs, then release the lock — holding it
+            // across an HTTP call would block copy_diagnostics for as long as
+            // the timeout.
+            let probe = shell
                 .server
                 .lock()
                 .ok()
-                .and_then(|slot| slot.as_ref().map(|s| s.is_generating()))
+                .and_then(|slot| slot.as_ref().map(|s| (s.port, s.token.clone())));
+            let generating = probe
+                .map(|(port, token)| server::is_generating_at(port, &token))
                 .unwrap_or(false);
 
             if generating {
-                let keep_going = app
+                // True for the FIRST button, which is "Close anyway" — so this
+                // is the user electing to lose the render, not to keep it.
+                let close_anyway = app
                     .dialog()
                     .message(
                         "An image is still being generated. It is only saved when it \
@@ -341,8 +366,17 @@ fn main() {
                         "Close anyway".into(),
                         "Keep generating".into(),
                     ))
+                    // blocking_show on the event-loop thread is against the
+                    // plugin's own guidance, and is safe here only because rfd
+                    // presents a PARENTLESS message dialog off the app's loop on
+                    // all three targets (macOS CFUserNotificationDisplayAlert on
+                    // its own thread, Windows ThreadFuture, Linux GtkGlobalThread).
+                    // That is an implementation detail, not a contract — if this
+                    // ever deadlocks after a tauri-plugin-dialog or rfd upgrade,
+                    // this is the line, and the fix is to move the prompt off the
+                    // event-loop thread rather than to fight the dialog.
                     .blocking_show();
-                if !keep_going {
+                if !close_anyway {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                     }
@@ -350,7 +384,7 @@ fn main() {
                 }
             }
 
-            *shell.closing.lock().unwrap() = true;
+            *shell.closing.lock().unwrap_or_else(|e| e.into_inner()) = true;
             // The semicolon matters: as a tail expression the guard's temporary
             // would outlive `shell` and the borrow checker rejects it.
             if let Ok(mut slot) = shell.server.lock() {

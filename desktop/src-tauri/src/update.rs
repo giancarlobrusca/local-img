@@ -40,7 +40,12 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 }
 
 pub fn check(current_version: &str) -> Option<UpdateInfo> {
-    let body = crate::bootstrap::agent()
+    // The bounded agent, not bootstrap's. bootstrap::agent() sets
+    // timeout_global(None) so a 111 MB download is never cut off mid-transfer;
+    // for a 5 KB JSON call that is the wrong guarantee. A captive portal that
+    // accepts the connection and never answers would park this thread — and
+    // the WebviewWindow clone it captured — for the life of the process.
+    let body = crate::server::poll_agent()
         .get(RELEASES_API)
         .header("Accept", "application/vnd.github+json")
         .call()

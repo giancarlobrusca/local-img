@@ -125,6 +125,9 @@ listen('shell://failed', ({ payload }) => {
   $('failDetail').textContent = payload.diagnostics || '';
   $('failDetail').hidden = !payload.diagnostics;
   $('retry').hidden = !payload.retryable;
+  // A genuinely broken install is exactly what this button is for, so it comes
+  // back even if the unsupported-platform branch hid it earlier.
+  $('reinstall').hidden = false;
 });
 
 $('start').onclick = () => {
@@ -166,6 +169,9 @@ async function boot() {
     $('failMessage').textContent = state.unsupported;
     $('failDetail').hidden = true;
     $('retry').hidden = true;
+    // Reinstalling cannot make an Intel Mac into a supported one; the button
+    // would only reproduce this identical message.
+    $('reinstall').hidden = true;
     return;
   }
   if (state.needsSetup) {
