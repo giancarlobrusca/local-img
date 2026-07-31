@@ -102,6 +102,17 @@ fn start_setup(app: AppHandle, window: WebviewWindow) {
 fn setup_and_hand_off(app: &AppHandle, window: &WebviewWindow) -> Result<(), events::Failure> {
     let shell = app.state::<Shell>();
 
+    // An uninstall in progress is deleting data_dir on another thread. The
+    // page's own guard against re-entering setup is a convention that lasts
+    // exactly until someone edits the HTML; this check is what actually
+    // stops `bootstrap::run` from recreating the directory `finish_uninstall`
+    // is mid-walk through — which would both resurrect files it just deleted
+    // and make `before.saturating_sub(after)` collapse to zero, underreporting
+    // what the uninstall freed.
+    if *shell.uninstalling.lock().unwrap_or_else(|e| e.into_inner()) {
+        return Ok(());
+    }
+
     // Any earlier server is finished with — a retry after a failed handoff,
     // or a reinstall. Shut it down before starting another, or two Python
     // children each holding a multi-GB pipeline overlap until the slot is
@@ -332,8 +343,11 @@ fn last_step() -> (String, String) {
 fn finish_uninstall(app: AppHandle, window: WebviewWindow, freed: u64) {
     {
         let shell = app.state::<Shell>();
-        // Nothing may start the server again, and the close handler must not
-        // ask about a render on a server that is about to stop existing.
+        // `closing` stops the close handler asking about a render on a server
+        // that is about to stop existing. `uninstalling` is what
+        // `setup_and_hand_off` checks before it touches `shell.server`, so a
+        // page that re-enters setup while this runs is refused rather than
+        // recreating `data_dir` out from under the deletion below.
         *shell.closing.lock().unwrap_or_else(|e| e.into_inner()) = true;
         *shell.uninstalling.lock().unwrap_or_else(|e| e.into_inner()) = true;
     }
@@ -351,7 +365,13 @@ fn finish_uninstall(app: AppHandle, window: WebviewWindow, freed: u64) {
     // blocks, and the webview has a screen to draw.
     std::thread::spawn(move || {
         let shell = app.state::<Shell>();
-        if let Ok(mut slot) = shell.server.lock() {
+        // Not `if let Ok(..)`: on a poisoned lock that would silently skip
+        // shutting Python down, and `remove_data_dir` would then delete the
+        // runtime out from under a still-live process — on Windows every open
+        // file lands in `resisted`, and the removed screen lists hundreds of
+        // paths instead of the handful a real failure would leave.
+        {
+            let mut slot = shell.server.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(server) = slot.take() {
                 server.shutdown();
             }
