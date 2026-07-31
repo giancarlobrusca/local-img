@@ -76,21 +76,30 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p stable
-          # artifactPaths is a JSON array; grep the quoted strings out of it
-          # rather than depend on jq being present on every runner image.
-          echo "$PATHS" | grep -o '"[^"]*"' | tr -d '"' | while read -r src; do
-            case "$src" in
-              *.dmg)      name=local-img-macos-arm64.dmg ;;
-              *.msi)      name=local-img-windows-x64.msi ;;
-              *.AppImage) name=local-img-linux-x64.AppImage ;;
-              *.deb)      name=local-img-linux-x64.deb ;;
-              *)          echo "skipping $src"; continue ;;
-            esac
-            cp "$src" "stable/$name"
-            echo "$src -> $name"
-          done
-          # No bundle matched means the rename table has drifted from what
-          # Tauri builds, and the download links would silently 404.
+          # artifactPaths is a JSON array. On windows-latest the paths are
+          # backslash-separated, and JSON.stringify escapes each backslash,
+          # so a bare grep/tr scrape leaves the escaping in place and hands
+          # cp a string that is not the real path. jq parses and unescapes
+          # it correctly, and ships by default on macos-14, windows-latest
+          # and ubuntu-22.04 (confirmed against actions/runner-images), so
+          # no extra install step is needed.
+          paths="$(printf '%s' "$PATHS" | jq -r '.[]' 2>/dev/null)" || paths=""
+          if [ -n "$paths" ]; then
+            while IFS= read -r src; do
+              case "$src" in
+                *.dmg)      name=local-img-macos-arm64.dmg ;;
+                *.msi)      name=local-img-windows-x64.msi ;;
+                *.AppImage) name=local-img-linux-x64.AppImage ;;
+                *.deb)      name=local-img-linux-x64.deb ;;
+                *)          echo "skipping $src"; continue ;;
+              esac
+              cp "$src" "stable/$name"
+              echo "$src -> $name"
+            done <<< "$paths"
+          fi
+          # No bundle matched -- whether artifactPaths was empty/malformed
+          # or the rename table has drifted from what Tauri builds -- means
+          # the download links would silently 404.
           test -n "$(ls -A stable)" || { echo "no bundles matched"; exit 1; }
           gh release upload "$TAG" stable/* --clobber --repo "$GITHUB_REPOSITORY"
 
