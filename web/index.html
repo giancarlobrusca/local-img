@@ -183,6 +183,8 @@
     color: var(--accent-text); font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer;
   }
   .banner button:hover { border-color: var(--accent); color: var(--text); }
+  .banner a { color: var(--accent-text); }
+  .banner a:hover { color: var(--text); }
 
   /* --------------------------------------------------------------- wizard -- */
   .overlay {
@@ -240,6 +242,10 @@
   <div class="banner" id="hwbanner" hidden>
     Model filtering is off — nothing is known about this machine yet.
     <button id="bannerScan">Analyze my machine</button>
+  </div>
+  <div class="banner" id="updbanner" hidden>
+    A newer version is available: <b id="updver"></b>.
+    <a id="updlink" href="#">Download it</a>
   </div>
 
   <div>
@@ -304,6 +310,15 @@
 <div class="overlay" id="wizard" hidden>
   <div class="card">
 
+    <div id="wizScan" hidden>
+      <h2>Analyzing your machine…</h2>
+      <p>Reading your chip, how much memory the GPU may actually use, and how
+         much disk is free. Nothing leaves this computer. It takes about a
+         second.</p>
+      <p class="err" id="wizScanError" hidden></p>
+      <button class="link" id="wizScanRetry" hidden>Try again</button>
+    </div>
+
     <div id="wizIntro">
       <h2>Before we start, let's see what your machine can do</h2>
       <p>This reads your chip, how much memory the GPU may actually use, and how
@@ -348,6 +363,19 @@ const $ = id => document.getElementById(id);
 let MODELS = {}, busy = false, current = null;
 let PROFILE = null, DEFAULT_KEY = null, SHOW_ALL = false;
 
+// Set by the shell's redirect. The user already agreed to the analysis on the
+// welcome screen, so the intro would be asking a second time.
+const FIRSTRUN = new URLSearchParams(location.search).has('firstrun');
+
+function showUpdate(info) {
+  // Injected by the desktop shell after its release check. Undefined in the
+  // repo flow, and undefined when the check found nothing or had no network.
+  if (!info || !info.version || !info.url) return;
+  $('updver').textContent = info.version;
+  $('updlink').href = info.url;
+  $('updbanner').hidden = false;
+}
+
 async function boot() {
   try {
     await refresh();
@@ -358,6 +386,7 @@ async function boot() {
     setStatus(`could not load the model catalog — ${e.message || e}`, '', true);
   }
   loadGallery();
+  showUpdate(window.LOCAL_IMG_UPDATE);
 }
 
 // An error body is not guaranteed to be JSON — a parse failure here would
@@ -475,11 +504,16 @@ async function scan(skip) {
 
 function openWizard() {
   $('wizard').hidden = false;
-  showStep('wizIntro');
+  if (FIRSTRUN) {
+    showStep('wizScan');
+    runAnalysis();
+  } else {
+    showStep('wizIntro');
+  }
 }
 
 function showStep(id) {
-  for (const step of ['wizIntro', 'wizResult', 'wizDownload']) {
+  for (const step of ['wizScan', 'wizIntro', 'wizResult', 'wizDownload']) {
     $(step).hidden = step !== id;
   }
 }
@@ -505,15 +539,25 @@ function wizardGroups(models) {
 }
 
 async function runAnalysis() {
+  // On first run the intro was skipped, so its error paragraph is off screen —
+  // a failure written there would be invisible and the window would just sit
+  // on "Analyzing…" forever.
+  const err = FIRSTRUN ? $('wizScanError') : $('wizError');
+  const fail = message => {
+    err.textContent = message;
+    err.hidden = false;
+    $('wizScanRetry').hidden = !FIRSTRUN;
+  };
+
   $('wizAnalyze').disabled = true;
   $('wizAnalyze').textContent = 'Analyzing…';
-  $('wizError').hidden = true;
+  err.hidden = true;
+  $('wizScanRetry').hidden = true;
   let data;
   try {
     data = await scan(false);
   } catch (e) {
-    $('wizError').textContent = `could not analyze this machine — ${e.message || e}`;
-    $('wizError').hidden = false;
+    fail(`could not analyze this machine — ${e.message || e}`);
     return;
   } finally {
     $('wizAnalyze').disabled = false;
@@ -522,10 +566,8 @@ async function runAnalysis() {
   const p = data.profile;
   if (!p) {
     // The scan was saved but could not be read back — without this the wizard
-    // would freeze on the intro with no message at all.
-    $('wizError').textContent =
-      'the analysis ran but its profile could not be read back — try again';
-    $('wizError').hidden = false;
+    // would freeze with no message at all.
+    fail('the analysis ran but its profile could not be read back — try again');
     return;
   }
   const chip = p.chip || 'unknown chip';
@@ -731,6 +773,9 @@ $('go').onclick = generate;
 $('hwline').onclick = () => { $('hwpanel').hidden = !$('hwpanel').hidden; };
 $('bannerScan').onclick = () => scan(false).catch(e => setStatus(`could not analyze this machine — ${e.message || e}`, '', true));
 $('wizAnalyze').onclick = runAnalysis;
+$('wizScanRetry').onclick = runAnalysis;
+// The shell may finish its release check after the page has loaded.
+window.addEventListener('local-img-update', () => showUpdate(window.LOCAL_IMG_UPDATE));
 $('wizSkip').onclick = async () => {
   try {
     await scan(true);
