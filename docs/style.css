@@ -125,6 +125,10 @@
   }
   .dl .file::after { content: "↓"; }
 
+  /* Linux's second card (.deb) reads as the alt format for the OS above it. */
+  .dl-sub { opacity: .78; }
+  .dl-sub:hover { opacity: 1; }
+
   .unsigned {
     font-size: 14px; color: var(--muted); margin-top: 18px; max-width: 60ch;
   }
