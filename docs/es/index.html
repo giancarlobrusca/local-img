@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>local-img — generá imágenes sin que salgan de tu computadora</title>
+<meta name="description" content="Generá imágenes en tu propia placa de video. Sin cuenta, sin API key, sin nube, sin filtro de contenido. Descargala para macOS, Windows o Linux.">
+<meta property="og:title" content="local-img">
+<meta property="og:description" content="Generación de imágenes que nunca sale de tu computadora.">
+<meta property="og:image" content="../preview.jpg">
+<link rel="alternate" hreflang="en" href="https://giancarlobrusca.github.io/local-img/">
+<link rel="alternate" hreflang="es" href="https://giancarlobrusca.github.io/local-img/es/">
+<link rel="alternate" hreflang="x-default" href="https://giancarlobrusca.github.io/local-img/">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<main class="wrap">
+
+  <!-- ------------------------------------------------------------ hero -->
+  <section class="hero">
+    <div class="eyebrow"><b>local-img</b> · macOS · Windows · Linux · MIT<span class="langs"><a href="../">EN</a> · ES</span></div>
+    <div class="stack">
+      <h1>Generá imágenes sin que salgan nunca de tu computadora.</h1>
+      <p class="lead">
+        Escribís un prompt, sale un PNG. Corre en <strong>tu propia placa de video</strong>,
+        así que nada de lo que escribís y nada de lo que hacés se sube, se registra
+        ni lo revisa nadie. Después de la primera descarga funciona con el wi-fi apagado.
+      </p>
+      <div class="nots">
+        <span class="not">sin cuenta</span>
+        <span class="not">sin API key</span>
+        <span class="not">sin suscripción</span>
+        <span class="not">sin filtro de contenido</span>
+        <span class="not">sin terminal</span>
+      </div>
+    </div>
+
+    <div class="downloads" id="downloads"
+         data-verb="Descargar para"
+         data-others="También para:"
+         data-mobile="Esto es una aplicación de escritorio — abrí esta página en la computadora donde la querés usar."
+         data-mac="Apple Silicon · M1 y posteriores"
+         data-windows="10 / 11 · 64 bits · NVIDIA"
+         data-linux="64 bits · NVIDIA · .AppImage">
+      <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-macos-arm64.dmg">
+        <span class="os">macOS</span>
+        <span class="meta">Apple Silicon · M1 y posteriores</span>
+        <span class="file">.dmg</span>
+      </a>
+      <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-windows-x64.msi">
+        <span class="os">Windows</span>
+        <span class="meta">10 / 11 · 64 bits · NVIDIA</span>
+        <span class="file">.msi</span>
+      </a>
+      <a class="dl" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-linux-x64.AppImage">
+        <span class="os">Linux</span>
+        <span class="meta">64 bits · NVIDIA</span>
+        <span class="file">.AppImage</span>
+      </a>
+      <a class="dl dl-sub" href="https://github.com/giancarlobrusca/local-img/releases/latest/download/local-img-linux-x64.deb">
+        <span class="os">Linux</span>
+        <span class="meta">Debian, Ubuntu y derivados</span>
+        <span class="file">.deb</span>
+      </a>
+    </div>
+
+    <p class="unsigned">
+      Los builds no están firmados — los certificados cuestan plata todos los años
+      y esto es gratis — así que tu computadora te va a avisar una vez cuando lo abras.
+      <a href="#security">Acá está exactamente qué dice y qué hay que tocar.</a>
+    </p>
+  </section>
+
+  <!-- ------------------------------------------------------------ shot -->
+  <section>
+    <figure>
+      <div class="shot">
+        <img src="../preview.jpg" width="1280" height="800"
+             alt="La ventana de local-img: el prompt y la configuración del modelo a la izquierda, el render elegido en el centro, y una tira con las imágenes anteriores abajo.">
+      </div>
+      <figcaption>
+        El prompt y la configuración a la izquierda, tu render en el centro, y abajo
+        todo lo que llevás hecho. Las imágenes se guardan en tu carpeta Pictures como PNG comunes.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ----------------------------------------------------- first launch -->
+  <section>
+    <div class="label">La primera vez que lo abrís</div>
+    <div class="col stack" style="margin-bottom: 30px;">
+      <h2>Se instala solo. No tenés que instalar nada más.</h2>
+      <p class="lead">
+        La mayoría de las herramientas como esta te piden instalar Python, después un
+        gestor de paquetes, después una lista de librerías. Esta trae los suyos y los
+        deja en una carpeta aparte, así después puede limpiar sin dejar nada dando vueltas.
+      </p>
+    </div>
+    <ol class="steps">
+      <li>
+        <div>
+          <h3>Descarga su motor</h3>
+          <p>
+            Alrededor de 1 GB en una Mac, o hasta 7 GB en una PC con placa NVIDIA,
+            donde las librerías gráficas pesan mucho más. Pasa una sola vez. Vas a ver
+            una barra de progreso, y podés cerrar la ventana y volver después.
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Mide tu máquina</h3>
+          <p>
+            Lee tu chip, cuánta memoria te va a entregar realmente la placa de video y
+            cuánto disco libre te queda — y después te muestra solo los modelos que van
+            a andar de verdad, con el resto listado junto al número que los bloquea.
+            Nada de tu máquina sale de tu máquina.
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Recomienda un modelo, y pregunta antes de bajarlo</h3>
+          <p>
+            Los modelos pesan entre 2 GB y 34 GB, así que te dice cuánto ocupa y espera.
+            De ahí en adelante ya estás generando imágenes, y la app funciona sin conexión.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- --------------------------------------------------------- hardware -->
+  <section>
+    <div class="label">Qué puede correr tu máquina</div>
+    <div class="col stack" style="margin-bottom: 30px;">
+      <h2>La memoria decide todo.</h2>
+      <p class="lead">
+        No hace falta que sepas nada de esto — la app lo resuelve sola y esconde lo que
+        no entra. Está acá porque es la respuesta honesta a «¿esto va a andar en mi laptop?».
+      </p>
+    </div>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Modelo</th>
+            <th scope="col">Descarga</th>
+            <th scope="col">Necesita</th>
+            <th scope="col">Por imagen</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="name">DreamShaper 8</td>
+            <td class="num">2.1 GB</td>
+            <td class="num">3 GB GPU · 8 GB RAM</td>
+            <td class="num measured">~18 s</td>
+          </tr>
+          <tr>
+            <td class="name">SD Turbo</td>
+            <td class="num">2.6 GB</td>
+            <td class="num">3 GB GPU · 8 GB RAM</td>
+            <td class="num">~2 s</td>
+          </tr>
+          <tr>
+            <td class="name">DreamShaper XL v2 Turbo</td>
+            <td class="num">6.9 GB</td>
+            <td class="num">9.5 GB GPU · 16 GB RAM</td>
+            <td class="num measured">~40 s</td>
+          </tr>
+          <tr>
+            <td class="name">Juggernaut XL v9</td>
+            <td class="num">7.1 GB</td>
+            <td class="num">9.5 GB GPU · 16 GB RAM</td>
+            <td class="num">~180 s</td>
+          </tr>
+          <tr>
+            <td class="name">Shuttle 3 Diffusion</td>
+            <td class="num">33.7 GB</td>
+            <td class="num">26 GB GPU · 48 GB RAM</td>
+            <td class="num">~120 s</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="footnote">
+      Son diez modelos en total; acá ves cinco. Los tiempos en
+      <span class="measured">este color</span> están medidos en un M1 Pro — el resto son
+      estimaciones, hasta que la app te vea generar tres veces con ese modelo: de ahí en
+      adelante usa tus propios números y lo aclara.
+    </p>
+  </section>
+
+  <!-- --------------------------------------------------------- security -->
+  <section id="security">
+    <div class="label">El aviso de seguridad</div>
+    <div class="col stack" style="margin-bottom: 30px;">
+      <h2>Tu computadora te va a frenar una vez. Así se pasa.</h2>
+      <p class="lead">
+        Los dos sistemas avisan cuando una app viene de alguien que no pagó un
+        certificado de firma. Es un clic, una sola vez, y tu computadora se acuerda.
+      </p>
+    </div>
+    <div class="prompts">
+      <div class="prompt">
+        <h3>macOS</h3>
+        <p class="quote">«local-img no se puede abrir porque no se puede verificar el desarrollador.»</p>
+        <p>
+          Botón derecho sobre la app en la carpeta Aplicaciones, <kbd>Open</kbd> —«Abrir»,
+          si tenés el sistema en español— y <kbd>Open</kbd> otra vez en el cartel que
+          aparece. Con doble clic no alcanza la primera vez: tiene que ser con botón derecho.
+        </p>
+      </div>
+      <div class="prompt">
+        <h3>Windows</h3>
+        <p class="quote">«Windows protegió tu PC.»</p>
+        <p>
+          Hacé clic en <kbd>More info</kbd> —«Más información»—, que despliega un botón,
+          y después en <kbd>Run anyway</kbd>. El botón no está a la vista hasta ese
+          primer clic, y es justo la parte que casi todos se pierden.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- source -->
+  <section>
+    <div class="label">O buildealo vos mismo</div>
+    <div class="col stack" style="margin-bottom: 26px;">
+      <h2>Acá no hay nada escondido.</h2>
+      <p class="lead">
+        Si preferís no pasar por un aviso de seguridad, o querés leer primero lo que vas
+        a correr, todo el proyecto está en GitHub y se instala desde el código en
+        cualquier máquina que tenga Python 3.11 o 3.12.
+      </p>
+    </div>
+    <pre><span class="c"># macOS o Linux</span>
+git clone https://github.com/giancarlobrusca/local-img
+cd local-img
+./setup.sh   <span class="c"># venv de Python + librerías, unos minutos</span>
+./run.sh     <span class="c"># → http://127.0.0.1:7788</span></pre>
+  </section>
+
+  <footer>
+    <span>Licencia MIT</span>
+    <span>Los pesos de los modelos tienen sus propias licencias</span>
+    <span class="sep"></span>
+    <a href="https://github.com/giancarlobrusca/local-img">Código en GitHub</a>
+  </footer>
+
+</main>
+
+<script src="../download.js"></script>
+</body>
+</html>

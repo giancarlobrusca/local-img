@@ -90,6 +90,43 @@ def test_detection_script_is_wired() -> None:
         check(f"download.js knows {asset}", asset in js)
 
 
+SITE = "https://giancarlobrusca.github.io/local-img/"
+
+
+def test_each_page_declares_the_other() -> None:
+    for page, lang, other in (("index.html", "en", "es/"),
+                              ("es/index.html", "es", "../")):
+        html = read(page)
+        check(f"{page} exists", bool(html))
+        check(f"{page} declares lang={lang}", f'<html lang="{lang}">' in html)
+        check(f"{page} points at the English URL",
+              f'hreflang="en" href="{SITE}"' in html)
+        check(f"{page} points at the Spanish URL",
+              f'hreflang="es" href="{SITE}es/"' in html)
+        check(f"{page} names an x-default",
+              f'hreflang="x-default" href="{SITE}"' in html)
+        check(f"{page} links to its counterpart", f'href="{other}"' in html)
+
+    es = read("es/index.html")
+    check("the Spanish page links the shared stylesheet",
+          'href="../style.css"' in es)
+    check("the Spanish page loads the shared script",
+          'src="../download.js"' in es)
+    check("the Spanish page has no inline <style>", "<style" not in es)
+
+
+def test_both_languages_state_the_same_numbers() -> None:
+    # Model sizes, memory floors and timings are facts, not copy. A number
+    # that drifts in one language is a page quietly lying to half its readers.
+    pattern = re.compile(r"\d+(?:\.\d+)?\s*(?:GB|s)\b")
+    en = sorted(pattern.findall(read("index.html")))
+    es = sorted(pattern.findall(read("es/index.html")))
+    check("English and Spanish quote the same figures", en == es)
+    if en != es:
+        print(f"    only in English: {sorted(set(en) - set(es))}")
+        print(f"    only in Spanish: {sorted(set(es) - set(en))}")
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
