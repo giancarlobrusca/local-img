@@ -45,6 +45,8 @@ import download  # noqa: E402
 # why Task 1 made HUB the single source of truth.
 download.HUB = HUB
 
+import storage  # noqa: E402
+
 failures: list[str] = []
 
 
@@ -185,6 +187,169 @@ def test_remove_reports_what_it_could_not_delete_instead_of_raising():
     finally:
         os.chmod(guarded, mode)
         shutil.rmtree(rd, ignore_errors=True)
+
+
+# -------------------------------------------------------- the inventory ---
+
+# A repo that belongs to somebody else. The shared cache is shared on purpose —
+# paths.hf_cache_dir() says so — and may hold weights another tool downloaded.
+FOREIGN = "someone/else"
+
+
+def with_fixture_cache(planted: dict, body) -> None:
+    """Run `body` with `planted` repos in the fixture cache, then clear them.
+
+    `planted` maps a repo id to the keyword arguments for plant_repo.
+    """
+    dirs = [plant_repo(repo, **kwargs) for repo, kwargs in planted.items()]
+    try:
+        body()
+    finally:
+        for rd in dirs:
+            shutil.rmtree(rd, ignore_errors=True)
+
+
+def test_a_foreign_repo_appears_in_no_inventory():
+    # THE central test. Everything else in this file is detail; this is the
+    # claim that justifies building the list from models.MODELS rather than
+    # from a directory listing.
+    from models import BY_KEY
+
+    def body():
+        inv = storage.inventory()
+        keys = [m["key"] for m in inv["models"]]
+        names = [m["name"] for m in inv["models"]]
+        check("the foreign repo is not a listed key",
+              not any("else" in k or "someone" in k for k in keys))
+        check("the foreign repo is not a listed name",
+              not any("else" in n or "someone" in n for n in names))
+        check("every listed key is a catalog key",
+              all(k in BY_KEY for k in keys))
+        check("the catalog model that is present is listed",
+              "dreamshaper-8" in keys)
+        check("the foreign repo's bytes are in no total",
+              sum(m["bytes"] for m in inv["models"])
+              == download.size_on_disk(BY_KEY["dreamshaper-8"]))
+
+    with_fixture_cache(
+        {FOREIGN: dict(weight_bytes=8192),
+         BY_KEY["dreamshaper-8"].repo: dict(weight_bytes=4096)},
+        body,
+    )
+
+
+def test_a_catalog_model_absent_from_the_cache_does_not_appear():
+    from models import BY_KEY
+
+    def body():
+        keys = [m["key"] for m in storage.inventory()["models"]]
+        check("the model in the cache is listed", "dreamshaper-8" in keys)
+        check("a model with nothing on disk is not listed",
+              "juggernaut-xl-v9" not in keys)
+
+    with_fixture_cache({BY_KEY["dreamshaper-8"].repo: dict(weight_bytes=4096)}, body)
+
+
+def test_a_half_finished_download_is_incomplete_and_still_offered():
+    from models import BY_KEY
+
+    def body():
+        row = next(m for m in storage.inventory()["models"] if m["key"] == "sd-turbo")
+        check("a snapshotless repo reads as incomplete", row["complete"] is False)
+        check("its bytes are real and non-zero", row["bytes"] > 0)
+        # Those gigabytes are recoverable garbage, and are exactly what someone
+        # opens this panel to find.
+        check("it is offered anyway", row["key"] in BY_KEY)
+
+    with_fixture_cache(
+        {BY_KEY["sd-turbo"].repo: dict(weight_bytes=4096, snapshot=False)}, body
+    )
+
+
+def test_a_complete_download_reads_as_complete():
+    from models import BY_KEY
+
+    def body():
+        row = next(m for m in storage.inventory()["models"] if m["key"] == "dreamshaper-8")
+        check("a full snapshot reads as complete", row["complete"] is True)
+
+    with_fixture_cache({BY_KEY["dreamshaper-8"].repo: dict(weight_bytes=4096)}, body)
+
+
+def test_the_runtime_is_measured_and_the_rest_excludes_it():
+    runtime = DATA / "runtime"
+    (runtime / "python" / "bin").mkdir(parents=True, exist_ok=True)
+    (runtime / "python" / "bin" / "python3").write_bytes(b"\0" * 3000)
+    (DATA / "profile.json").write_text("{}", encoding="utf-8")
+    try:
+        inv = storage.inventory()
+        check("the runtime is measured", inv["runtime"] == 3000)
+        check("the rest is the data directory minus the runtime",
+              inv["rest"] == 2)          # the two bytes of "{}"
+    finally:
+        shutil.rmtree(runtime, ignore_errors=True)
+        (DATA / "profile.json").unlink(missing_ok=True)
+
+
+def test_outputs_are_counted_with_their_sidecars():
+    png = OUT / "zz-storage-test-a.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n")
+    png.with_suffix(".json").write_text('{"seed": 1}', encoding="utf-8")
+    try:
+        out = storage.inventory()["outputs"]
+        check("one render is counted", out["count"] == 1)
+        check("the sidecar is counted too",
+              out["bytes"] == png.stat().st_size + png.with_suffix(".json").stat().st_size)
+        check("the folder is named so the user can find it", out["path"] == str(OUT))
+    finally:
+        png.unlink(missing_ok=True)
+        png.with_suffix(".json").unlink(missing_ok=True)
+
+
+def test_removing_outputs_takes_renders_and_sidecars_and_nothing_else():
+    png = OUT / "zz-storage-test-b.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n")
+    png.with_suffix(".json").write_text('{"seed": 1}', encoding="utf-8")
+    stranger = OUT / "zz-storage-test-notes.txt"
+    stranger.write_text("not ours", encoding="utf-8")
+    try:
+        freed, resisted = storage.remove_outputs()
+        check("the render is gone", not png.exists())
+        check("its sidecar is gone", not png.with_suffix(".json").exists())
+        check("something the user put there survives", stranger.exists())
+        check("the bytes freed are reported", freed > 0)
+        check("nothing resisted", resisted == [])
+    finally:
+        png.unlink(missing_ok=True)
+        png.with_suffix(".json").unlink(missing_ok=True)
+        stranger.unlink(missing_ok=True)
+
+
+def test_removing_the_xet_cache_leaves_the_hub_alone():
+    from models import BY_KEY
+
+    def body():
+        xet = download.xet_dir()
+        (xet / "chunks").mkdir(parents=True, exist_ok=True)
+        (xet / "chunks" / "blob").write_bytes(b"\0" * 1024)
+        check("the dedup cache is measured", storage.inventory()["xet"] == 1024)
+        freed, resisted = storage.remove_xet()
+        check("the dedup cache is gone", not xet.exists())
+        check("its bytes are reported", freed == 1024)
+        check("nothing resisted", resisted == [])
+        check("the weights beside it survive",
+              download.repo_dir(BY_KEY["dreamshaper-8"].repo).exists())
+
+    with_fixture_cache({BY_KEY["dreamshaper-8"].repo: dict(weight_bytes=4096)}, body)
+
+
+def test_an_empty_machine_inventories_cleanly():
+    # Nothing planted. The panel must open on a fresh install rather than 500.
+    inv = storage.inventory()
+    check("models is an empty list", inv["models"] == [])
+    check("runtime is zero", inv["runtime"] == 0)
+    check("xet is zero", inv["xet"] == 0)
+    check("outputs is empty", inv["outputs"]["count"] == 0)
 
 
 if __name__ == "__main__":
