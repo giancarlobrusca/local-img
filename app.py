@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 import download
 import hardware
 import paths
+import storage
 from models import BY_KEY, DEFAULT_MODEL, MODELS
 
 ROOT = Path(__file__).parent
@@ -180,20 +181,41 @@ class PipelineCache:
         self.pipe = None
         self.lock = threading.Lock()
 
+    def unload(self):
+        """Drop the resident pipeline and give its memory back.
+
+        Split out of `get` because deleting a model's weights has to do exactly
+        this first: they are open in memory, which on Windows means locked files.
+        """
+        if self.pipe is None:
+            return
+        del self.pipe
+        self.pipe = None
+        self.key = None
+        gc.collect()
+        if DEVICE == "mps":
+            torch.mps.empty_cache()
+        elif DEVICE == "cuda":
+            torch.cuda.empty_cache()
+
+    def unload_if(self, key: str) -> bool:
+        """Unload only when `key` is the pipeline that is resident.
+
+        Returns whether it was. Deleting one model must not evict another.
+        """
+        with self.lock:
+            if self.key != key:
+                return False
+            self.unload()
+            return True
+
     def get(self, key: str, on_status):
         if self.key == key and self.pipe is not None:
             return self.pipe
 
         if self.pipe is not None:
             on_status(f"unloading {self.key}")
-            del self.pipe
-            self.pipe = None
-            self.key = None
-            gc.collect()
-            if DEVICE == "mps":
-                torch.mps.empty_cache()
-            elif DEVICE == "cuda":
-                torch.cuda.empty_cache()
+            self.unload()
 
         spec = BY_KEY[key]
         on_status(f"loading {spec.name} (first run downloads ~{spec.download_gb} GB)")
@@ -651,6 +673,61 @@ def delete_output(name: str):
     path.unlink()
     path.with_suffix(".json").unlink(missing_ok=True)
     return {"deleted": name}
+
+
+# ----------------------------------------------------------------- storage ---
+
+def _refuse_while_busy():
+    """409 while anything is in flight.
+
+    Both delete routes check this themselves. The panel greys its buttons out
+    from /api/busy, but that is courtesy — between painting a button and
+    clicking it there is ample time for a render to start, and a render holds
+    the weights this would unlink.
+    """
+    live = [j for j in JOBS.values() if not j.done]
+    if any(j.kind == "generate" for j in live):
+        raise HTTPException(409, "an image is being generated — try again when it finishes")
+    if any(j.kind == "download" for j in live):
+        raise HTTPException(409, "a download is in progress — try again when it finishes")
+
+
+@app.get("/api/storage")
+def storage_inventory():
+    """Everything local-img has put on this disk, with sizes."""
+    return storage.inventory()
+
+
+@app.delete("/api/storage/models/{key}")
+def delete_model(key: str):
+    """Delete one model's weights.
+
+    `key` is checked against the catalog before anything else. That check is
+    what makes the shared Hugging Face cache safe to point this at: a repo
+    belonging to another tool has no key, so there is no request that names it.
+    """
+    if key not in BY_KEY:
+        raise HTTPException(400, f"unknown model {key}")
+    _refuse_while_busy()
+    CACHE.unload_if(key)
+    freed, resisted = download.remove(BY_KEY[key])
+    return {"freed": freed, "resisted": resisted}
+
+
+@app.delete("/api/storage/outputs")
+def delete_outputs():
+    """Delete every render and its sidecar."""
+    _refuse_while_busy()
+    freed, resisted = storage.remove_outputs()
+    return {"freed": freed, "resisted": resisted}
+
+
+@app.delete("/api/storage/xet")
+def delete_xet():
+    """Delete the Xet chunk cache — a dedup store that duplicates the blobs."""
+    _refuse_while_busy()
+    freed, resisted = storage.remove_xet()
+    return {"freed": freed, "resisted": resisted}
 
 
 app.mount("/web", StaticFiles(directory=ROOT / "web"), name="web")

@@ -46,6 +46,10 @@ import download  # noqa: E402
 download.HUB = HUB
 
 import storage  # noqa: E402
+import app as app_module  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+client = TestClient(app_module.app)
 
 failures: list[str] = []
 
@@ -350,6 +354,136 @@ def test_an_empty_machine_inventories_cleanly():
     check("runtime is zero", inv["runtime"] == 0)
     check("xet is zero", inv["xet"] == 0)
     check("outputs is empty", inv["outputs"]["count"] == 0)
+
+
+# ------------------------------------------------------------- the routes ---
+
+class FakePipe:
+    """Stands in for a loaded pipeline. The unload path only ever drops the
+    reference and empties the device cache; it never calls into the object."""
+
+
+def resident(key: str) -> None:
+    app_module.CACHE.key = key
+    app_module.CACHE.pipe = FakePipe()
+
+
+def clear_resident() -> None:
+    app_module.CACHE.key = None
+    app_module.CACHE.pipe = None
+
+
+def test_the_inventory_route_answers():
+    res = client.get("/api/storage")
+    check("200 from /api/storage", res.status_code == 200)
+    body = res.json()
+    for field in ("runtime", "models", "xet", "outputs", "rest"):
+        check(f"the inventory carries {field}", field in body)
+
+
+def test_the_foreign_repo_can_be_named_to_no_route():
+    # The other half of the central claim: not merely absent from the list, but
+    # unreachable through the route, because the route validates against BY_KEY.
+    def body():
+        for name in ("someone--else", "models--someone--else", "someone%2Felse", "else"):
+            res = client.delete(f"/api/storage/models/{name}")
+            check(f"{name} is refused", res.status_code in (400, 404))
+        check("the foreign repo is still on disk",
+              (HUB / "models--someone--else").exists())
+
+    with_fixture_cache({FOREIGN: dict(weight_bytes=2048)}, body)
+
+
+def test_deleting_a_model_frees_its_bytes():
+    from models import BY_KEY
+
+    def body():
+        rd = download.repo_dir(BY_KEY["dreamshaper-8"].repo)
+        expected = blob_bytes(rd)
+        res = client.delete("/api/storage/models/dreamshaper-8")
+        check("200 on delete", res.status_code == 200)
+        # >=, not ==: where the platform copies snapshots instead of linking
+        # them, those copies are real bytes that really were freed.
+        check("the bytes freed are reported", res.json()["freed"] >= expected)
+        check("nothing resisted", res.json()["resisted"] == [])
+        check("the repo directory is gone", not rd.exists())
+
+    with_fixture_cache({BY_KEY["dreamshaper-8"].repo: dict(weight_bytes=4096)}, body)
+
+
+def test_deleting_the_loaded_model_unloads_it_first():
+    from models import BY_KEY
+
+    def body():
+        resident("dreamshaper-8")
+        try:
+            # Its weights are open in memory, which on Windows means locked
+            # files. The unload has to happen before the unlink, not after.
+            client.delete("/api/storage/models/dreamshaper-8")
+            check("the pipeline was dropped", app_module.CACHE.pipe is None)
+            check("the cache key was cleared", app_module.CACHE.key is None)
+        finally:
+            clear_resident()
+
+    with_fixture_cache({BY_KEY["dreamshaper-8"].repo: dict(weight_bytes=4096)}, body)
+
+
+def test_deleting_another_model_leaves_the_resident_one_alone():
+    from models import BY_KEY
+
+    def body():
+        resident("dreamshaper-8")
+        try:
+            client.delete("/api/storage/models/sd-turbo")
+            check("a different model's delete keeps the pipeline resident",
+                  app_module.CACHE.pipe is not None)
+            check("and keeps its key", app_module.CACHE.key == "dreamshaper-8")
+        finally:
+            clear_resident()
+
+    with_fixture_cache({BY_KEY["sd-turbo"].repo: dict(weight_bytes=2048)}, body)
+
+
+def test_every_delete_route_is_409_while_a_render_is_in_flight():
+    # The panel greys its buttons out from /api/busy, but that is courtesy:
+    # between painting a button and clicking it there is ample time for a render
+    # to start. Constructed directly rather than by hitting /api/generate, which
+    # would load a 7 GB pipeline.
+    job = app_module.Job("zz-storage-test-job", "generate")
+    app_module.JOBS[job.id] = job
+    try:
+        for route in ("/api/storage/models/dreamshaper-8",
+                      "/api/storage/outputs",
+                      "/api/storage/xet"):
+            check(f"{route} is 409 while generating",
+                  client.delete(route).status_code == 409)
+        check("the inventory still answers while busy",
+              client.get("/api/storage").status_code == 200)
+    finally:
+        app_module.JOBS.pop(job.id, None)
+
+
+def test_the_delete_routes_are_409_while_a_download_is_in_flight():
+    job = app_module.Job("zz-storage-test-dl", "download")
+    app_module.JOBS[job.id] = job
+    try:
+        check("deleting a model is 409 while downloading",
+              client.delete("/api/storage/models/dreamshaper-8").status_code == 409)
+    finally:
+        app_module.JOBS.pop(job.id, None)
+
+
+def test_the_outputs_and_xet_routes_answer():
+    png = OUT / "zz-storage-test-route.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n")
+    try:
+        res = client.delete("/api/storage/outputs")
+        check("200 from the outputs route", res.status_code == 200)
+        check("the render is gone", not png.exists())
+        check("200 from the xet route",
+              client.delete("/api/storage/xet").status_code == 200)
+    finally:
+        png.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

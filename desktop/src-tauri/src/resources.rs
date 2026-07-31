@@ -19,6 +19,7 @@ pub const PYTHON_FILES: &[&str] = &[
     "hardware.py",
     "models.py",
     "download.py",
+    "storage.py",
     "requirements.txt",
     "web/index.html",
 ];

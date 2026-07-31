@@ -22,6 +22,7 @@ jobs:
       - run: python paths_test.py
       - run: python shell_test.py
       - run: python delete_test.py
+      - run: python storage_test.py
       - run: python hardware_test.py
 
   landing:
