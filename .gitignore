@@ -22,3 +22,4 @@ docs/superpowers/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/src-tauri/python/
+.vercel
