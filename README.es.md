@@ -247,6 +247,48 @@ abierta.
 La seed `-1` aleatoriza. Fijar una seed y variar un solo parámetro es la forma más
 rápida de entender a qué responde un modelo.
 
+## Desinstalar
+
+Una instalación de local-img son cuatro cosas en cuatro lugares, y solo una de
+ellas es la app:
+
+| Qué | Dónde | Tamaño |
+|---|---|---|
+| La app | `/Applications`, `Program Files`, o el `.AppImage`/`.deb` | ~10 MB |
+| El motor de Python privado | macOS `~/Library/Application Support/local-img` · Windows `%LOCALAPPDATA%\local-img` · Linux `~/.local/share/local-img` | 1–7 GB |
+| Los pesos de los modelos | `~/.cache/huggingface` | 2–34 GB cada uno |
+| Tus imágenes | `Pictures/local-img` | lo que hayas generado |
+
+Arrastrar la app a la papelera borra la primera fila y deja las otras tres.
+
+**Desde la app.** Abrí **Storage** en la barra lateral. Lista cada una de esas
+cosas con su tamaño y borra cualquiera de ellas — de a un modelo por vez es el
+caso de todos los días, y recupera 7 GB sin desinstalar nada. *Delete everything
+and uninstall* ("borrar todo y desinstalar") saca los pesos, la caché de
+deduplicación de Hugging Face y el motor de una sola vez, y pregunta aparte por
+tus imágenes, que son lo único que no se puede volver a descargar. La última
+pantalla te dice que arrastres la app a la papelera — en Windows, que la quites
+desde **Apps & features** ("aplicaciones y características") — porque una app no
+puede borrarse a sí misma mientras está corriendo.
+
+Nada de esto es automático ni programado, y nunca se toca nada fuera de esos
+cuatro lugares. La caché de Hugging Face la comparte cualquier otra cosa de la
+máquina que la use, así que el panel ofrece solo los modelos del catálogo de este
+proyecto: un repo de otra herramienta no tiene ningún nombre por el cual podría
+borrarse.
+
+**Desde el código.** El mismo panel está, sin la mitad de la desinstalación: el
+motor es tu propio `.venv` y no le corresponde a este proyecto borrarlo. A mano:
+
+```bash
+rm -rf ~/.cache/huggingface/hub/models--Lykon--dreamshaper-xl-v2-turbo  # un modelo
+rm -rf ~/.cache/huggingface/xet            # la caché de dedup — copia de lo anterior
+rm -rf .venv outputs .local-img            # el motor, las imágenes, el perfil
+```
+
+Conviene borrar los directorios de modelos por nombre y no la carpeta `hub/`
+entera, que puede tener pesos de otra cosa.
+
 ## Estructura
 
 ```
@@ -255,10 +297,12 @@ models.py        registro de modelos (repos, valores por defecto, tamaños, requ
 hardware.py      detección de la máquina, reglas de compatibilidad, estimaciones de tiempo
 paths.py         dónde viven el perfil y los renders, a partir de dos variables de entorno
 download.py      descarga previa de pesos, reanudable
+storage.py       qué hay en disco, por nombre y tamaño, y cómo borrarlo
 delete_test.py   chequeos offline de la ruta de borrado y de la sesión
 hardware_test.py chequeos offline de detección, fit, estimaciones y rutas
 paths_test.py    chequeos offline de la resolución de rutas en los dos modos
 shell_test.py    chequeos offline del puerto y del watchdog del proceso padre
+storage_test.py  chequeos offline del inventario, sus rutas y el panel
 web/index.html   toda la interfaz, sin paso de build
 desktop/         el shell Tauri — instala Python, corre app.py, sin clonar nada
 outputs/         PNGs generados + sus archivos de parámetros (ignorados por git)

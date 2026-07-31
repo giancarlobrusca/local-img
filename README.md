@@ -233,6 +233,47 @@ button on the image you are viewing.
 Seed `-1` randomizes. Fixing a seed and varying one parameter is the fastest way
 to learn what a model responds to.
 
+## Uninstall
+
+An installed local-img is four things in four places, and only one of them is
+the app:
+
+| What | Where | Size |
+|---|---|---|
+| The app | `/Applications`, `Program Files`, or the `.AppImage`/`.deb` | ~10 MB |
+| The private Python engine | macOS `~/Library/Application Support/local-img` · Windows `%LOCALAPPDATA%\local-img` · Linux `~/.local/share/local-img` | 1–7 GB |
+| Model weights | `~/.cache/huggingface` | 2–34 GB each |
+| Your renders | `Pictures/local-img` | whatever you made |
+
+Dragging the app to the Trash removes the first row and leaves the other three.
+
+**From the app.** Open **Storage** in the sidebar. It lists every one of those
+with its size and deletes any of them — one model at a time is the everyday
+case, and reclaims 7 GB without uninstalling anything. *Delete everything and
+uninstall* removes the weights, the Hugging Face dedup cache and the engine in
+one go, asking separately about your images, which are the only part that cannot
+be downloaded again. The last screen tells you to drag the app itself to the
+Trash — on Windows, to remove it in **Apps & features** — because an app cannot
+delete itself while it is running.
+
+Nothing here is scheduled or automatic, and nothing outside those four places is
+ever touched. The Hugging Face cache is shared with anything else on this machine
+that uses it, so the panel offers only the models in this project's catalog: a
+repo that belongs to another tool has no name it could be deleted by.
+
+**From the source install.** The same Storage panel is there, without the
+uninstall half: the engine is your own `.venv` and is not this project's to
+remove. By hand:
+
+```bash
+rm -rf ~/.cache/huggingface/hub/models--Lykon--dreamshaper-xl-v2-turbo  # one model
+rm -rf ~/.cache/huggingface/xet                # the dedup cache — a copy of the above
+rm -rf .venv outputs .local-img                # the engine, the renders, the profile
+```
+
+Delete model directories by name rather than the whole `hub/` folder, which may
+hold weights belonging to something else.
+
 ## Layout
 
 ```
@@ -241,10 +282,12 @@ models.py        model registry (repo ids, defaults, sizes, fit requirements)
 hardware.py      machine detection, per-model fit rules, speed estimates
 paths.py         where the profile and the renders live, from two env vars
 download.py      resumable weight prefetch
+storage.py       what is on disk, by name and size, and how to delete it
 delete_test.py   offline checks for the delete route and the session gate
 hardware_test.py offline checks for detection, fit, estimates, routes
 paths_test.py    offline checks for path resolution in both modes
 shell_test.py    offline checks for the port and the parent watchdog
+storage_test.py  offline checks for the inventory, its routes, and the panel
 web/index.html   the entire UI, no build step
 desktop/         the Tauri shell — bootstraps Python, runs app.py, no clone needed
 outputs/         generated PNGs + parameter sidecars (gitignored)
