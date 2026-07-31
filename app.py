@@ -335,6 +335,13 @@ def _watch_download(job: Job, spec, stop: threading.Event):
         except OSError:
             continue
         gb_done = done / 1e9
+        if stop.is_set():
+            # The scan above (glob + stat over every blob) takes real I/O time,
+            # so run_download's finally may have set stop and already emitted
+            # "done" while we were scanning. Recheck right before emitting so a
+            # stray "download" event can't land after the job is over — do not
+            # remove this as a duplicate of the loop's stop.wait() check above.
+            break
         job.emit(
             stage="download",
             pct=min(99, round(gb_done / spec.download_gb * 100)),
