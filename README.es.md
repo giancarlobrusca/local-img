@@ -40,9 +40,9 @@ Los builds **no están firmados** — los certificados de firma cuestan dinero p
 año y esto es una herramienta gratuita. Los dos sistemas avisan, una vez:
 
 - **macOS** — "no se puede abrir local-img porque no se puede verificar al
-  desarrollador". Click derecho sobre la app en Aplicaciones, **Abrir**, y
-  **Abrir** otra vez en el diálogo. macOS se acuerda de la decisión.
-- **Windows** — "Windows protegió su PC". Click en **Más información** y
+  desarrollador". Hacé clic derecho sobre la app en Aplicaciones, elegí **Abrir**,
+  y después **Abrir** otra vez en el diálogo. macOS se acuerda de la decisión.
+- **Windows** — "Windows protegió su PC". Hacé clic en **Más información** y
   después en **Ejecutar de todas formas**.
 
 Si preferís no pasar por eso, la instalación desde el código de abajo compila
