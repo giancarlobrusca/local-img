@@ -14,6 +14,8 @@
     --muted: #8b929c;
     --accent: #7c8cff;
     --accent-dim: #2b3160;
+    --accent-text: #b9c2ff;
+    --accent-line: #3b4383;
     --danger: #ff6b6b;
     --radius: 10px;
   }
@@ -72,7 +74,7 @@
   .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
          padding: 2px 7px; border-radius: 20px; background: var(--panel-2);
          color: var(--muted); border: 1px solid var(--line); }
-  .tag.recommended { background: var(--accent-dim); color: #b9c2ff; border-color: #3b4383; }
+  .tag.recommended { background: var(--accent-dim); color: var(--accent-text); border-color: var(--accent-line); }
   .tag.uncensored { color: #ffb37a; border-color: #4a3524; background: #241a12; }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -115,7 +117,7 @@
   .bar { flex: 1; height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
   .bar > i { display: block; height: 100%; width: 0; background: var(--accent);
              transition: width .18s ease; }
-  .status .err { color: var(--danger); }
+  .err { color: var(--danger); }
   .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, monospace; }
 
   .gallery {
@@ -173,12 +175,12 @@
   .hwpanel dt { color: var(--muted); }
   .hwpanel dd { margin: 0; color: var(--text); }
   .banner {
-    background: var(--accent-dim); border: 1px solid #3b4383; color: #b9c2ff;
+    background: var(--accent-dim); border: 1px solid var(--accent-line); color: var(--accent-text);
     border-radius: var(--radius); padding: 10px 11px; font-size: 12px; line-height: 1.45;
   }
   .banner button {
-    margin-top: 8px; background: none; border: 1px solid #3b4383; border-radius: 6px;
-    color: #b9c2ff; font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer;
+    margin-top: 8px; background: none; border: 1px solid var(--accent-line); border-radius: 6px;
+    color: var(--accent-text); font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer;
   }
   .banner button:hover { border-color: var(--accent); color: var(--text); }
 
@@ -310,6 +312,7 @@
          <code>.local-img/profile.json</code>. It takes about a second.</p>
       <p>The point is to stop offering you models that will not fit, and to stop
          hiding ones that will.</p>
+      <p class="err" id="wizError" hidden></p>
       <div class="row">
         <button class="primary" id="wizAnalyze">Analyze my machine</button>
         <button class="link" id="wizSkip">Skip — show me everything</button>
@@ -434,7 +437,7 @@ function renderHardware() {
     '<button class="link" id="rescan">Re-analyze this machine</button>';
 
   $('showAll').onchange = e => { SHOW_ALL = e.target.checked; renderModels(Object.values(MODELS)); };
-  $('rescan').onclick = () => scan(false);
+  $('rescan').onclick = () => scan(false).catch(e => setStatus(`could not analyze this machine — ${e.message || e}`, '', true));
 }
 
 function row(term, value) {
@@ -442,10 +445,12 @@ function row(term, value) {
 }
 
 async function scan(skip) {
-  const data = await (await fetch('/api/hardware/scan', {
+  const res = await fetch('/api/hardware/scan', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ skip }),
-  })).json();
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+  const data = await res.json();
   applyData(data);
   return data;
 }
@@ -484,9 +489,14 @@ function wizardGroups(models) {
 async function runAnalysis() {
   $('wizAnalyze').disabled = true;
   $('wizAnalyze').textContent = 'Analyzing…';
+  $('wizError').hidden = true;
   let data;
   try {
     data = await scan(false);
+  } catch (e) {
+    $('wizError').textContent = `Could not analyze this machine — ${e.message || e}`;
+    $('wizError').hidden = false;
+    return;
   } finally {
     $('wizAnalyze').disabled = false;
     $('wizAnalyze').textContent = 'Analyze my machine';
@@ -680,9 +690,17 @@ function finish() {
 $('model').onchange = applyModel;
 $('go').onclick = generate;
 $('hwline').onclick = () => { $('hwpanel').hidden = !$('hwpanel').hidden; };
-$('bannerScan').onclick = () => scan(false);
+$('bannerScan').onclick = () => scan(false).catch(e => setStatus(`could not analyze this machine — ${e.message || e}`, '', true));
 $('wizAnalyze').onclick = runAnalysis;
-$('wizSkip').onclick = async () => { await scan(true); closeWizard(); };
+$('wizSkip').onclick = async () => {
+  try {
+    await scan(true);
+  } catch (e) {
+    setStatus(`could not save the skip — ${e.message || e}`, '', true);
+  } finally {
+    closeWizard();
+  }
+};
 $('wizNext').onclick = prepareDownload;
 $('wizDlGo').onclick = downloadDefault;
 $('wizDlSkip').onclick = closeWizard;
