@@ -189,22 +189,52 @@ def test_origin_allowed_is_a_predicate():
     # Called directly, because the interesting cases are the ones a browser
     # would never let a test send.
     allowed = app_module.origin_allowed
-    check("no Origin is allowed", allowed(None, "127.0.0.1:7788"))
-    check("an empty Origin is allowed", allowed("", "127.0.0.1:7788"))
+    check("no Origin is allowed", allowed(None, "http", "127.0.0.1:7788"))
+    check("an empty Origin is allowed", allowed("", "http", "127.0.0.1:7788"))
     check("the same origin is allowed",
-          allowed("http://127.0.0.1:7788", "127.0.0.1:7788"))
+          allowed("http://127.0.0.1:7788", "http", "127.0.0.1:7788"))
     check("localhost against localhost is allowed",
-          allowed("http://localhost:7788", "localhost:7788"))
+          allowed("http://localhost:7788", "http", "localhost:7788"))
     check("another port is rejected",
-          not allowed("http://127.0.0.1:9999", "127.0.0.1:7788"))
+          not allowed("http://127.0.0.1:9999", "http", "127.0.0.1:7788"))
     check("a public site is rejected",
-          not allowed("https://evil.example", "127.0.0.1:7788"))
+          not allowed("https://evil.example", "http", "127.0.0.1:7788"))
     check("a sandboxed null Origin is rejected",
-          not allowed("null", "127.0.0.1:7788"))
+          not allowed("null", "http", "127.0.0.1:7788"))
     check("a file Origin is rejected",
-          not allowed("file://", "127.0.0.1:7788"))
+          not allowed("file://", "http", "127.0.0.1:7788"))
     check("a missing Host with an Origin present is rejected",
-          not allowed("http://127.0.0.1:7788", None))
+          not allowed("http://127.0.0.1:7788", "http", None))
+    check("a mismatched scheme is rejected",
+          not allowed("https://127.0.0.1:7788", "http", "127.0.0.1:7788"))
+
+
+def test_query_token_is_scoped_to_the_handoff_route():
+    # / converts a query token into a cookie because a top-level navigation
+    # cannot set a header. Nowhere else may accept it — a query string leaks
+    # into Referer headers, browser history, shell history, and any future log.
+    gated, restore = gated_client()
+    try:
+        check("a query token off / is 403",
+              gated.get(f"/api/gallery?token={TOKEN}").status_code == 403)
+        check("a query token on / still redirects",
+              gated.get(f"/?token={TOKEN}", follow_redirects=False).status_code == 303)
+    finally:
+        restore()
+
+
+def test_the_header_authenticates_without_a_cookie():
+    # How the shell's own Rust code authenticates: a cross-origin page cannot
+    # set a custom header without a CORS preflight, which the middleware
+    # refuses, so this channel is open to the shell and shut to pages.
+    gated, restore = gated_client()
+    try:
+        res = gated.get("/api/gallery", headers={"X-Local-Img-Token": TOKEN})
+        check("the header authenticates", res.status_code == 200)
+        res = gated.get("/api/gallery", headers={"X-Local-Img-Token": "wrong"})
+        check("a wrong header value is 403", res.status_code == 403)
+    finally:
+        restore()
 
 
 def test_busy_reports_nothing_when_idle():
@@ -246,6 +276,8 @@ if __name__ == "__main__":
             test_the_token_route_sets_the_cookie_and_redirects,
             test_a_foreign_origin_is_rejected_even_with_the_cookie,
             test_origin_allowed_is_a_predicate,
+            test_query_token_is_scoped_to_the_handoff_route,
+            test_the_header_authenticates_without_a_cookie,
             test_busy_reports_nothing_when_idle,
             test_busy_separates_renders_from_downloads,
         ):

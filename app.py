@@ -71,6 +71,10 @@ DTYPE = torch.float32 if DEVICE == "cpu" else torch.float16
 # Empty means the repo flow: no cookie, no Origin check, nothing gated.
 TOKEN = os.environ.get("LOCAL_IMG_TOKEN", "").strip()
 COOKIE_NAME = "local_img_session"
+# How the shell's own Rust code authenticates. A custom header is the point: a
+# cross-origin page cannot set one without a CORS preflight, which the
+# middleware refuses — so this channel is open to the shell and shut to pages.
+TOKEN_HEADER = "x-local-img-token"
 # /api/health is what the shell polls to learn the child is up — before the
 # window has navigated anywhere, and therefore before any cookie exists.
 OPEN_PATHS = frozenset({"/api/health"})
@@ -78,7 +82,7 @@ OPEN_PATHS = frozenset({"/api/health"})
 app = FastAPI(title="local-img")
 
 
-def origin_allowed(origin: str | None, host: str | None) -> bool:
+def origin_allowed(origin: str | None, scheme: str | None, host: str | None) -> bool:
     """Whether a browser-supplied Origin may act on this server.
 
     Same-origin requests either omit Origin entirely (top-level navigations,
@@ -86,34 +90,50 @@ def origin_allowed(origin: str | None, host: str | None) -> bool:
     Anything else — another page on another port, a public site, the literal
     `null` a sandboxed iframe sends — is a cross-site caller.
 
-    Comparing against the request's own Host rather than a hardcoded
-    127.0.0.1 allowlist is what makes this both correct under an arbitrary
+    An origin is a triple, so all three parts are compared. Comparing against
+    the request's own scheme and Host rather than a hardcoded 127.0.0.1
+    allowlist is what makes this both correct under an arbitrary
     LOCAL_IMG_PORT and testable through TestClient, whose host is `testserver`.
     """
     if not origin:
         return True
     parsed = urlparse(origin)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+    if not parsed.netloc:
         return False
-    return parsed.netloc == (host or "")
+    return (parsed.scheme, parsed.netloc) == (scheme, host)
 
 
 @app.middleware("http")
 async def require_session(request, call_next):
     """The whole gate, in one place. Inert when TOKEN is empty.
 
-    A malicious page can neither read an HttpOnly cookie nor persuade the
-    browser to send a SameSite=Strict one cross-site, so the cookie alone would
-    do. The Origin check is the second lock: it costs one comparison and it
-    still holds if a future browser relaxes SameSite defaults.
+    Three ways to present the token, and the differences matter:
+
+      cookie  — how the browser carries it after the handoff. HttpOnly, so no
+                page can read it; SameSite=Strict, so none can make the browser
+                send it cross-site.
+      header  — how the shell's own Rust code authenticates. A cross-origin
+                page cannot set a custom header without a CORS preflight, which
+                this middleware answers with 403.
+      query   — accepted on `/` ONLY, because a top-level navigation cannot set
+                a header and `/` is the one route that converts token to
+                cookie. Allowing it everywhere would make the whole API
+                bearer-authenticated over the leakiest channel there is:
+                Referer, browser history, shell history, and any future log.
     """
     if not TOKEN:
         return await call_next(request)
     if request.url.path in OPEN_PATHS:
         return await call_next(request)
-    if not origin_allowed(request.headers.get("origin"), request.headers.get("host")):
+    if not origin_allowed(
+        request.headers.get("origin"), request.url.scheme, request.headers.get("host")
+    ):
         return PlainTextResponse("forbidden origin", status_code=403)
-    supplied = request.cookies.get(COOKIE_NAME) or request.query_params.get("token")
+    supplied = (
+        request.cookies.get(COOKIE_NAME)
+        or request.headers.get(TOKEN_HEADER)
+        or (request.query_params.get("token") if request.url.path == "/" else None)
+    )
     if supplied != TOKEN:
         return PlainTextResponse("missing session", status_code=403)
     return await call_next(request)
