@@ -35,6 +35,10 @@ jobs:
       # No pip install: landing_test.py is standard library only, so a docs
       # change gets its answer in seconds instead of after a torch download.
       - run: python landing_test.py
+      # Node is preinstalled on ubuntu-24.04. This loads the real download.js
+      # and drives its pure pickPlatform/isMobile functions with fabricated
+      # UAs, which landing_test.py (stdlib-only) cannot do.
+      - run: node docs/download_test.js
 
   bootstrap:
     name: bootstrap on ${{ matrix.os }}

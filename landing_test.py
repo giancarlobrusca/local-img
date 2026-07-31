@@ -29,6 +29,8 @@ def test_stylesheet_is_shared() -> None:
     css = read("style.css")
     check("style.css exists and is not a stub", len(css) > 2000)
     check("style.css is CSS, not a page with tags in it", "</" not in css)
+    for cls in (".dl-hero", ".dl-others", ".dl-mobile", ".dl-sub"):
+        check(f"style.css defines {cls}", cls in css)
 
     en = read("index.html")
     check("the English page has no inline <style>", "<style" not in en)
@@ -56,8 +58,7 @@ def release_links(html: str) -> list[str]:
 def test_downloads_are_direct() -> None:
     for page in PAGES:
         html = read(page)
-        if not html:
-            continue          # es/index.html arrives in Task 5
+        check(f"{page} exists", bool(html))
         links = release_links(html)
         check(f"{page} links to releases at all", bool(links))
         check(f"{page} sends every release link straight to a file",
@@ -69,8 +70,7 @@ def test_downloads_are_direct() -> None:
 def test_no_versioned_filenames() -> None:
     for name in ("index.html", "es/index.html", "download.js"):
         text = read(name)
-        if not text:
-            continue          # both arrive in later tasks
+        check(f"{name} exists", bool(text))
         check(f"{name} names no versioned bundle", "local-img_" not in text)
 
 
@@ -86,8 +86,34 @@ def test_detection_script_is_wired() -> None:
           "window.localImgPickPlatform" in js)
     check("download.js refuses to guess on touch devices",
           "maxTouchPoints" in js)
+    check("download.js's hero links use the same prefix the HTML does",
+          DOWNLOAD_BASE in js)
     for asset in ASSETS[:3]:      # the .deb is reached through the others line
         check(f"download.js knows {asset}", asset in js)
+
+
+DATA_KEYS = ("verb", "others", "mobile", "mac", "windows", "linux")
+
+
+def data_attr(html: str, key: str) -> str | None:
+    match = re.search(rf'data-{key}="([^"]*)"', html)
+    return match.group(1) if match else None
+
+
+def test_hero_strings_are_translated() -> None:
+    # The data-* attributes are the only script-facing copy: download.js
+    # reads every visible hero string from them. A value that reverts to
+    # English, or that goes missing, is invisible to every other check here.
+    en = read("index.html")
+    es = read("es/index.html")
+    for key in DATA_KEYS:
+        en_value = data_attr(en, key)
+        es_value = data_attr(es, key)
+        check(f"index.html declares data-{key}", en_value is not None)
+        check(f"es/index.html declares data-{key}", es_value is not None)
+        if en_value is not None and es_value is not None:
+            check(f"data-{key} is translated, not copied from English",
+                  en_value != es_value)
 
 
 SITE = "https://giancarlobrusca.github.io/local-img/"
