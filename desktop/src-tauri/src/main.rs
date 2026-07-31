@@ -11,6 +11,7 @@ mod progress;
 mod resources;
 mod server;
 mod stamp;
+mod uninstall;
 mod update;
 
 use layout::Layout;
