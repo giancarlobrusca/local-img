@@ -85,8 +85,11 @@ más RAM del sistema.
 imagen escalado desde una máquina de referencia (M1 Pro, GPU de 16 núcleos).
 Después de generar tres imágenes con un modelo, la app pasa a usar la mediana de
 tus propios tiempos registrados y lo aclara. Los factores de escalado para NVIDIA
-son estimaciones sin calibrar hasta que eso ocurre — este proyecto no tiene
-hardware NVIDIA contra el cual medir.
+siguen siendo mayormente conjeturas: se midió exactamente una máquina NVIDIA (una
+RTX 3050 Laptop — ver las bases más abajo), y resultó cerca del **doble de lenta**
+de lo que `cuda_perf_factor()` predice para una placa que no reconoce. Tomá el
+número de la primera corrida en cualquier GPU NVIDIA como optimista hasta que tus
+tres renders lo reemplacen.
 
 ## Desde el código
 
@@ -113,9 +116,36 @@ a ejecutar nunca empieza de cero.
 ./download.sh prune             # borra archivos cacheados que ningún pipeline carga
 ```
 
+### Windows
+
+Los scripts de shell son solo para macOS/Linux — un venv de Windows deja su
+intérprete en `.venv\Scripts\`, no en `.venv/bin/`. El equivalente, en PowerShell:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv .venv
+.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe download.py dreamshaper-8
+.venv\Scripts\python.exe app.py                    # → http://127.0.0.1:7788
+```
+
+Instalar torch desde el índice de CUDA **primero** es el paso que importa. El
+wheel de torch para Windows en PyPI es solo-CPU, así que un `pip install -r
+requirements.txt` a secas deja una app que arranca, funciona y reporta en
+silencio `device: cpu` — imágenes correctas a una fracción de la velocidad, sin
+ningún error que explique por qué. Hacerlo en este orden conserva la build de
+CUDA, porque el `torch>=2.4` posterior ya queda satisfecho. Elegí la etiqueta de
+índice que corresponda a la versión de CUDA de tu driver, que `nvidia-smi`
+imprime arriba a la derecha.
+
+Nombrá el intérprete 3.12 explícitamente en vez de usar `py` o `python`: en una
+máquina donde 3.13 es el default, torch no tiene wheel y la instalación falla al
+resolver dependencias. Para forzar un dispositivo, definí la variable para la
+sesión antes: `$env:LOCAL_IMG_DEVICE = "cpu"`.
+
 ## Modelos
 
-Nueve modelos, desde portátiles de 8 GB hasta estaciones de trabajo de 64 GB.
+Diez modelos, desde GPUs de portátil de 4 GB hasta estaciones de trabajo de 64 GB.
 Todos los repositorios son públicos y resuelven sin token de Hugging Face. Los
 repos con acceso restringido — FLUX.1-schnell, FLUX.1-dev y la familia Stable
 Diffusion 3.5 — quedan deliberadamente afuera: devuelven `GatedRepoError: 401` de
@@ -146,6 +176,18 @@ XL Turbo a 1024×1024/7 pasos → **39.5 s** y **42.8 s**. El resto está extrap
 de esos costos por paso. Los números de flux son los menos confiables: ningún
 modelo flux entra en los 11.8 GB utilizables de esta máquina, así que ese camino
 no está probado acá y sus requisitos de memoria son estimaciones conservadoras.
+
+Desde entonces se midió una máquina NVIDIA — una **RTX 3050 Laptop, 4 GB de
+VRAM** (Windows 11, driver 577, CUDA 12.9), la placa más chica que el catálogo
+admite. SD Turbo a 512×512/2 pasos → **1.1 s**; DreamShaper 8 a 512×768/25 pasos
+→ **12.4 s**; LCM DreamShaper v7 a 768×768/6 pasos → **8.4 s**. El pico de
+memoria de GPU sobre toda la placa, escritorio incluido, fue 2.9 / 3.6 / 3.8 GB:
+las tres entradas de la familia SD 1.5 sí entran en una placa de 4 GB, pero la de
+768px deja menos de 200 MB de margen, así que tener otra aplicación pesada en GPU
+abierta al mismo tiempo es la diferencia entre un render y un error por falta de
+memoria. Contra la única base que fue medida, el factor de escalado real de esa
+placa es de alrededor de **1.4** — bastante por debajo del 3.0 que `hardware.py`
+asume para una placa que no reconoce.
 
 Los tamaños en disco son lo que el pipeline carga realmente. Los repositorios en
 sí son mucho más grandes: dreamshaper-xl-v2-turbo son 41.6 GB completo, porque
