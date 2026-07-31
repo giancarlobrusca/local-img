@@ -232,7 +232,7 @@ fn download(
         let read = reader.read(&mut buffer).map_err(|e| {
             BootstrapError::new(
                 "The download stopped partway",
-                format!("after {} — {e}", progress::human_gb(done)),
+                format!("after {} — {e}", progress::human_size(done)),
                 true,
             )
         })?;
