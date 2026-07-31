@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>local-img</title>
+<style>
+  :root {
+    --bg: #0c0d10;
+    --panel: #141619;
+    --panel-2: #1b1e23;
+    --line: #282c33;
+    --text: #e8eaed;
+    --muted: #8b929c;
+    --accent: #7c8cff;
+    --danger: #ff6b6b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 32px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 30px; width: 100%; max-width: 560px;
+  }
+  h1 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
+  p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.65; }
+  .primary {
+    background: var(--accent); border: 0; border-radius: var(--radius);
+    color: #0c0d10; font: inherit; font-weight: 600; padding: 11px 18px;
+    cursor: pointer; margin-top: 8px;
+  }
+  .primary:hover { filter: brightness(1.08); }
+  .primary:disabled { opacity: .5; cursor: default; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="card" id="welcome">
+  <h1>Welcome to local-img</h1>
+  <p>This generates images on your own machine. No account, no API key, no
+     cloud — and nothing you type or produce leaves this computer.</p>
+  <p>Before the first image, two things have to be downloaded: a private Python
+     engine of about <b id="engineSize">…</b>, and then a model, whose size
+     depends on what your hardware can run. You will be asked again before the
+     model download starts.</p>
+  <button class="primary" id="start">Set up local-img</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+// Filled in by the shell in Task 10; until then the welcome screen is static.
+$('engineSize').textContent = '1–2 GB';
+</script>
+</body>
+</html>

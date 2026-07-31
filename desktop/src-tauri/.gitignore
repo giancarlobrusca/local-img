@@ -1,0 +1,4 @@
+/target/
+/gen/
+# Copied in by build.rs from the repo root — the originals are the source.
+/python/

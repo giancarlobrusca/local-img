@@ -16,3 +16,9 @@ docs/superpowers/
 
 # macOS
 .DS_Store
+
+# Desktop shell build output. The generated icon set and icon-source.png are
+# committed — they are build inputs, not artifacts.
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/python/
