@@ -271,8 +271,10 @@ rm -rf ~/.cache/huggingface/xet                # the dedup cache — a copy of t
 rm -rf .venv outputs .local-img                # the engine, the renders, the profile
 ```
 
-Delete model directories by name rather than the whole `hub/` folder, which may
-hold weights belonging to something else.
+Back up `outputs` first if you want to keep it — of everything that last line
+removes, it is the only part nothing can re-download. Delete model directories
+by name rather than the whole `hub/` folder, which may hold weights belonging
+to something else.
 
 ## Layout
 

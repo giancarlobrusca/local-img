@@ -264,11 +264,11 @@ Arrastrar la app a la papelera borra la primera fila y deja las otras tres.
 **Desde la app.** Abrí **Storage** en la barra lateral. Lista cada una de esas
 cosas con su tamaño y borra cualquiera de ellas — de a un modelo por vez es el
 caso de todos los días, y recupera 7 GB sin desinstalar nada. *Delete everything
-and uninstall* ("borrar todo y desinstalar") saca los pesos, la caché de
+and uninstall* («borrar todo y desinstalar») saca los pesos, la caché de
 deduplicación de Hugging Face y el motor de una sola vez, y pregunta aparte por
 tus imágenes, que son lo único que no se puede volver a descargar. La última
 pantalla te dice que arrastres la app a la papelera — en Windows, que la quites
-desde **Apps & features** ("aplicaciones y características") — porque una app no
+desde **Apps & features** («aplicaciones y características») — porque una app no
 puede borrarse a sí misma mientras está corriendo.
 
 Nada de esto es automático ni programado, y nunca se toca nada fuera de esos
@@ -286,8 +286,10 @@ rm -rf ~/.cache/huggingface/xet            # la caché de dedup — copia de lo 
 rm -rf .venv outputs .local-img            # el motor, las imágenes, el perfil
 ```
 
-Conviene borrar los directorios de modelos por nombre y no la carpeta `hub/`
-entera, que puede tener pesos de otra cosa.
+Hacé un backup de `outputs` antes si querés conservarlo — de todo lo que borra
+esa última línea, es lo único que no se puede volver a descargar. Conviene
+borrar los directorios de modelos por nombre y no la carpeta `hub/` entera, que
+puede tener pesos de otra cosa.
 
 ## Estructura
 
