@@ -29,8 +29,16 @@ def runtime_dir() -> Path:
 
 
 def _size(path: Path) -> int:
+    """Bytes this entry occupies, and not the bytes it points at.
+
+    lstat, not stat. A render that is a symlink into somebody's photo library
+    is a few dozen bytes of link; `remove_outputs` unlinks the link and frees
+    exactly those, so measuring the target would promise gigabytes this panel
+    cannot deliver. `download.dir_size` skips symlinks for the same reason —
+    the number on screen has to be what deleting would actually free.
+    """
     try:
-        return path.stat().st_size
+        return path.lstat().st_size
     except OSError:
         return 0
 

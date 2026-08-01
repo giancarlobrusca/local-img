@@ -61,17 +61,36 @@ fn remove_tree(path: &Path, resisted: &mut Vec<String>) {
 // No test here calls the impure half either, since current_exe() only
 // reflects the test binary. app_folder_from below carries the coverage.
 pub fn app_folder() -> PathBuf {
-    app_folder_from(&std::env::current_exe().unwrap_or_default())
+    app_folder_from(
+        &std::env::current_exe().unwrap_or_default(),
+        std::env::var_os("APPIMAGE").map(PathBuf::from).as_deref(),
+    )
 }
 
-/// The pure half of `app_folder`, so the macOS case is testable off macOS.
+/// The pure half of `app_folder`, so every platform's case is testable from any
+/// platform.
 ///
-/// Inside a bundle `current_exe` is `local-img.app/Contents/MacOS/local-img`,
-/// so the folder that holds the *bundle* is four levels up — opening the folder
-/// that holds the binary would open the inside of the bundle, where there is
-/// nothing to drag anywhere. Everywhere else the binary sits in the folder
-/// directly, and no ancestor ends in `.app`, so this reduces to the parent.
-pub fn app_folder_from(exe: &Path) -> PathBuf {
+/// Three shapes, because the three targets disagree about what "where the app
+/// lives" means:
+///
+/// An **AppImage** runs from a temporary mountpoint — `current_exe` is
+/// something like `/tmp/.mount_XXXXXX/usr/bin/local-img`, which is not where
+/// the user's `.AppImage` file sits and will not exist at all once the app
+/// exits. The runtime exports `APPIMAGE` with the real path, so that wins when
+/// it is set. Without it the button would open a temp directory and the user
+/// would find nothing to delete.
+///
+/// Inside a **macOS bundle** `current_exe` is
+/// `local-img.app/Contents/MacOS/local-img`, so the folder that holds the
+/// *bundle* is four levels up — opening the folder that holds the binary would
+/// open the inside of the bundle, where there is nothing to drag anywhere.
+///
+/// Everywhere else the binary sits in the folder directly, no ancestor ends in
+/// `.app`, and this reduces to the parent.
+pub fn app_folder_from(exe: &Path, appimage: Option<&Path>) -> PathBuf {
+    if let Some(parent) = appimage.and_then(Path::parent) {
+        return parent.to_path_buf();
+    }
     let bundle = exe
         .ancestors()
         .find(|p| p.extension().is_some_and(|ext| ext == "app"));
@@ -193,21 +212,51 @@ mod tests {
         // that holds the *binary* would open the inside of the bundle, where
         // there is nothing for the user to drag anywhere.
         assert_eq!(
-            app_folder_from(Path::new(
-                "/Applications/local-img.app/Contents/MacOS/local-img"
-            )),
+            app_folder_from(
+                Path::new("/Applications/local-img.app/Contents/MacOS/local-img"),
+                None
+            ),
             Path::new("/Applications")
+        );
+    }
+
+    #[test]
+    fn an_appimage_resolves_to_where_the_file_is_not_where_it_is_mounted() {
+        // The whole point of this case: current_exe() inside a running
+        // AppImage is a temporary mountpoint that stops existing when the app
+        // exits, so opening its folder shows the user nothing they can delete.
+        // The runtime hands us the real path in APPIMAGE.
+        assert_eq!(
+            app_folder_from(
+                Path::new("/tmp/.mount_localiQ8kFz/usr/bin/local-img"),
+                Some(Path::new("/home/gian/Downloads/local-img-linux-x64.AppImage")),
+            ),
+            Path::new("/home/gian/Downloads")
+        );
+    }
+
+    #[test]
+    fn the_appimage_path_wins_over_the_mountpoint_even_when_it_looks_like_a_bundle() {
+        // Contrived, but it pins the precedence: APPIMAGE is consulted before
+        // the .app-ancestor walk, so a mountpoint that happens to contain
+        // ".app" cannot steal the answer.
+        assert_eq!(
+            app_folder_from(
+                Path::new("/tmp/.mount_x/weird.app/Contents/MacOS/local-img"),
+                Some(Path::new("/opt/apps/local-img.AppImage")),
+            ),
+            Path::new("/opt/apps")
         );
     }
 
     #[test]
     fn a_plain_binary_resolves_to_its_own_folder() {
         assert_eq!(
-            app_folder_from(Path::new("/opt/local-img/local-img")),
+            app_folder_from(Path::new("/opt/local-img/local-img"), None),
             Path::new("/opt/local-img")
         );
         assert_eq!(
-            app_folder_from(Path::new("/local-img")),
+            app_folder_from(Path::new("/local-img"), None),
             Path::new("/")
         );
     }

@@ -134,6 +134,44 @@ mod tests {
     }
 
     #[test]
+    fn the_capability_pattern_matches_the_url_the_shell_actually_navigates_to() {
+        // The property the whole uninstall depends on, and the one that fails
+        // silently: if this pattern does not match the page's real URL, the
+        // ACL rejects `finish_uninstall` at runtime with no compile error and
+        // no failing test anywhere. Until now it was argued from reading
+        // urlpattern's source — that a pattern with an empty pathname, search
+        // and hash has each replaced with `*`. This executes it instead,
+        // against the URL `server::handoff_url` genuinely builds, so a later
+        // edit to either side is caught here rather than on a user's machine.
+        use tauri::utils::acl::RemoteUrlPattern;
+
+        let json = capability("local-page.json");
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let raw = value["remote"]["urls"][0].as_str().expect("a remote url");
+        let pattern: RemoteUrlPattern = raw.parse().expect("the pattern parses");
+
+        // Both shapes the shell hands the window: the first launch carries
+        // ?firstrun=1, every later one does not. The token is always present.
+        for url in [
+            crate::server::handoff_url(51234, "abc123", true),
+            crate::server::handoff_url(7788, "deadbeef", false),
+        ] {
+            let parsed = url.parse().expect("a URL we just built");
+            assert!(pattern.test(&parsed), "{raw} must match {url}");
+        }
+
+        // And it must not be so loose that any page can reach the command.
+        for foreign in [
+            "http://evil.example/",
+            "https://127.0.0.1:51234/",
+            "http://127.0.0.2:51234/",
+        ] {
+            let parsed = foreign.parse().unwrap();
+            assert!(!pattern.test(&parsed), "{raw} must not match {foreign}");
+        }
+    }
+
+    #[test]
     fn build_rs_declares_the_manifest_from_this_list() {
         let build = std::fs::read_to_string(crate_dir().join("build.rs")).unwrap();
         assert!(

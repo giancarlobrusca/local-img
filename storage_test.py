@@ -296,6 +296,32 @@ def test_the_runtime_is_measured_and_the_rest_excludes_it():
         (DATA / "profile.json").unlink(missing_ok=True)
 
 
+def test_a_symlinked_render_is_measured_as_the_link_not_its_target():
+    # Anyone who aliases a photo library into their renders folder would
+    # otherwise see the panel promise gigabytes that deleting cannot free:
+    # remove_outputs unlinks the link and frees the link's own few bytes.
+    if not SYMLINKS:
+        check("skipped: this platform does not allow symlinks", True)
+        return
+    target = FIXTURE / "zz-storage-test-big.bin"
+    target.write_bytes(b"\0" * 500_000)
+    png = OUT / "zz-storage-test-linked.png"
+    png.symlink_to(target)
+    try:
+        measured = storage.inventory()["outputs"]["bytes"]
+        check("the link is counted, not the 500 KB it points at",
+              measured < 10_000)
+        check("and it is counted at all", measured > 0)
+        freed, resisted = storage.remove_outputs()
+        check("deleting it frees what was reported", freed == measured)
+        check("the link is gone", not png.exists() and not png.is_symlink())
+        check("its target survives", target.exists())
+        check("nothing resisted", resisted == [])
+    finally:
+        png.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
+
+
 def test_outputs_are_counted_with_their_sidecars():
     png = OUT / "zz-storage-test-a.png"
     png.write_bytes(b"\x89PNG\r\n\x1a\n")
