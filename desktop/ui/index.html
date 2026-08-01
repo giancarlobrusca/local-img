@@ -89,13 +89,24 @@
   </div>
 </div>
 
+<div class="card" id="removed" hidden>
+  <h1 id="removedTitle">Removing local-img</h1>
+  <p id="removedBody">Deleting the engine. This takes a few seconds.</p>
+  <pre id="removedPaths" hidden></pre>
+  <div class="row" id="removedButtons" hidden>
+    <button class="primary" id="openApps">Open the folder</button>
+    <button class="link" id="openLeftovers" hidden>Open the folder they are in</button>
+    <button class="link" id="quit">Quit</button>
+  </div>
+</div>
+
 <script>
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const $ = id => document.getElementById(id);
 
 function show(which) {
-  for (const id of ['welcome', 'progress', 'failure']) $(id).hidden = id !== which;
+  for (const id of ['welcome', 'progress', 'failure', 'removed']) $(id).hidden = id !== which;
 }
 
 // Two phases share one bar, weighted by how long each actually takes. The
@@ -130,6 +141,36 @@ listen('shell://failed', ({ payload }) => {
   $('reinstall').hidden = false;
 });
 
+// The uninstall's own screen. Two states: the deletion is still running, or it
+// is over — and if it is over it says what actually happened, including when
+// part of it would not go.
+function showRemoved(removed) {
+  show('removed');
+  $('removedButtons').hidden = false;
+  $('openApps').textContent = removed.openLabel;
+  const stuck = removed.resisted.length;
+  $('openLeftovers').hidden = !stuck;
+  if (stuck) {
+    $('removedTitle').textContent = 'Almost — some files would not delete';
+    $('removedBody').textContent =
+      `local-img freed ${removed.freed}. ${stuck} file${stuck === 1 ? '' : 's'} ` +
+      `could not be deleted and are still in ${removed.dataDir}, listed below. ` +
+      removed.lastStep;
+    $('removedPaths').textContent = removed.resisted.join('\n');
+    $('removedPaths').hidden = false;
+  } else {
+    $('removedTitle').textContent = `local-img freed ${removed.freed}`;
+    $('removedBody').textContent = removed.lastStep;
+    $('removedPaths').hidden = true;
+  }
+}
+
+listen('shell://removed', ({ payload }) => showRemoved(payload));
+
+$('openApps').onclick = () => invoke('open_app_location');
+$('openLeftovers').onclick = () => invoke('open_data_dir');
+$('quit').onclick = () => invoke('quit_app');
+
 $('start').onclick = () => {
   $('start').disabled = true;
   show('progress');
@@ -163,6 +204,16 @@ $('reinstall').onclick = () => {
 
 async function boot() {
   const state = await invoke('initial_state');
+  if (state.removed) {
+    showRemoved(state.removed);
+    return;
+  }
+  if (state.uninstalling) {
+    // The window navigated back here while the deletion is still running. The
+    // card's default copy is the working state; the event finishes it.
+    show('removed');
+    return;
+  }
   if (state.unsupported) {
     show('failure');
     $('failTitle').textContent = 'This machine is not supported';

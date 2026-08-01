@@ -519,6 +519,39 @@ def test_the_panel_respects_busy():
     check("it handles the 409 the routes return anyway", "409" in html)
 
 
+# ------------------------------------------------------ the shell's screens ---
+
+SHELL_UI = ROOT / "desktop" / "ui" / "index.html"
+
+
+def shell_ui() -> str:
+    return SHELL_UI.read_text(encoding="utf-8")
+
+
+def test_the_shell_has_a_removed_card():
+    html = shell_ui()
+    check("the card exists", 'id="removed"' in html)
+    check("show() can select it", "'removed'" in html)
+    check("it reads the result from initial_state", "state.removed" in html)
+    check("it also listens for the event", "shell://removed" in html)
+    check("it handles a deletion still running", "state.uninstalling" in html)
+
+
+def test_the_removed_card_never_claims_a_clean_run_it_did_not_have():
+    html = shell_ui()
+    check("it inspects what resisted", "resisted" in html)
+    check("it names the data directory", "dataDir" in html)
+    check("and offers to open it", "open_data_dir" in html)
+    check("the last step is not hardcoded to one platform",
+          "lastStep" in html and "Applications to the Trash" not in html)
+
+
+def test_the_removed_card_offers_its_buttons():
+    html = shell_ui()
+    check("a button opens where the app lives", "open_app_location" in html)
+    check("a button quits", "quit_app" in html)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
