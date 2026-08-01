@@ -449,12 +449,18 @@ async function loadStorage() {
   renderStorage();
 }
 
-function storageRow(what, bytes, { note = '', deletable = false, id = '' } = {}) {
+function storageRow(what, bytes, { note = '', deletable = false, id = '', name = '' } = {}) {
+  // The button carries its own display name (data-name) rather than making
+  // deleteOne look it back up in MODELS: MODELS can still be {} when this
+  // panel opens before boot()'s /api/models call resolves, or forever if that
+  // call failed while /api/storage succeeded — a real, anticipated case, per
+  // boot()'s own catch block. Reading it off the row that is on screen cannot
+  // drift from what the user is looking at, and cannot be undefined.
   return `<div class="srow">
             <span class="what">${what}</span>
             ${note ? `<span class="note">${note}</span>` : ''}
             <span class="size">${human(bytes)}</span>
-            ${deletable ? `<button data-del="${id}" ${BUSY ? 'disabled' : ''}>Delete</button>` : ''}
+            ${deletable ? `<button data-del="${id}" data-name="${name || what}" ${BUSY ? 'disabled' : ''}>Delete</button>` : ''}
           </div>`;
 }
 
@@ -504,7 +510,7 @@ function renderStorage() {
 
   $('storageBody').innerHTML = html;
   $('storageBody').querySelectorAll('[data-del]').forEach(button => {
-    button.onclick = () => deleteOne(button.dataset.del);
+    button.onclick = () => deleteOne(button.dataset.del, button.dataset.name);
   });
   $('wipe').onclick = openWipe;
 }
@@ -518,9 +524,9 @@ async function storageDelete(path) {
   return res.json();
 }
 
-async function deleteOne(id) {
+async function deleteOne(id, name) {
   const [kind, key] = id.split(':');
-  const what = kind === 'model' ? MODELS[key].name
+  const what = kind === 'model' ? name
              : kind === 'xet' ? 'the dedup cache'
              : 'every image you have generated';
   if (!confirm(`Delete ${what}?`)) return;

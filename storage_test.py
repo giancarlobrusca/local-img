@@ -15,6 +15,7 @@ Run: python storage_test.py
 
 import json
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -516,7 +517,26 @@ def test_the_panel_offers_a_delete_per_model():
 def test_the_panel_respects_busy():
     html = page()
     check("it asks what is in flight", "/api/busy" in html)
-    check("it handles the 409 the routes return anyway", "409" in html)
+
+    # A bare `"409" in html` would pass on a code comment mentioning the
+    # number, with no error handling behind it at all. Instead, pull the two
+    # functions that actually carry a 409 to the user and assert on their
+    # mechanism: storageDelete must throw the server's own message rather than
+    # swallow a non-ok response, and deleteOne must catch that throw and route
+    # it through setStatus as an error rather than let it vanish to the
+    # console.
+    delete_fn = re.search(r"async function storageDelete\(.*?\n\}", html, re.S)
+    check("storageDelete is defined", bool(delete_fn))
+    delete_body = delete_fn.group(0) if delete_fn else ""
+    check("storageDelete throws the server's message on a non-ok response",
+          "if (!res.ok) throw new Error(await errorText(res));" in delete_body)
+
+    one_fn = re.search(r"async function deleteOne\(.*?\n\}", html, re.S)
+    check("deleteOne is defined", bool(one_fn))
+    one_body = one_fn.group(0) if one_fn else ""
+    check("deleteOne catches the throw", "catch (e)" in one_body)
+    check("deleteOne reports it through setStatus as an error",
+          "setStatus(String(e.message || e), '', true);" in one_body)
 
 
 # ------------------------------------------------------ the shell's screens ---
