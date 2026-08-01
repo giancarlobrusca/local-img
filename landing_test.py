@@ -245,6 +245,31 @@ def test_the_mark_is_inline_and_theme_aware() -> None:
               'rel="icon"' in html and "favicon.svg" in html)
 
 
+def test_the_pages_are_branded_ocre() -> None:
+    for page in PAGES:
+        html = read(page)
+        title = re.search(r"<title>(.*?)</title>", html, re.S)
+        check(f"{page} has a title", title is not None)
+        if title is not None:
+            check(f"{page}'s title names Ocre", "Ocre" in title.group(1))
+        check(f"{page}'s og:title is Ocre",
+              'property="og:title" content="Ocre"' in html)
+        check(f"{page}'s eyebrow names Ocre", "<b>Ocre</b>" in html)
+
+
+def test_the_macos_quote_is_still_literal() -> None:
+    # macOS names the app in that dialog, and the app is still called
+    # local-img. This test exists so that a careless find-and-replace of
+    # local-img -> Ocre breaks the suite instead of the page: it would
+    # promise the reader a dialog they will never see.
+    for page in PAGES:
+        html = read(page)
+        quotes = re.findall(r'<p class="quote">(.*?)</p>', html, re.S)
+        check(f"{page} still shows two security quotes", len(quotes) == 2)
+        check(f"{page}'s macOS quote still says local-img",
+              any("local-img" in quote for quote in quotes))
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
