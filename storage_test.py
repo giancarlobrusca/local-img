@@ -608,6 +608,26 @@ def test_the_flow_reports_what_resisted():
     check("failures are collected, not swallowed", "resisted" in html)
 
 
+def test_a_409_mid_flow_keeps_what_was_already_freed():
+    html = page()
+    check("freed lives outside the run, not reset on every call",
+          "WIPE_FREED" in html)
+    check("resisted lives outside the run the same way",
+          "WIPE_RESISTED" in html)
+    check("the accumulator resets when the dialog opens, not when a run starts",
+          "WIPE_FREED = 0" in html)
+    check("a retry adds to the running total rather than starting over",
+          "WIPE_FREED +=" in html)
+    check("the shell receives the accumulated total, not a call-local one",
+          "freed: WIPE_FREED" in html)
+
+
+def test_a_409_mid_flow_refreshes_the_enumerated_list():
+    html = page()
+    check("the list is rebuilt from the fresh inventory after a failed attempt",
+          "renderWipeList" in html)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]

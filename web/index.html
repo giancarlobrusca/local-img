@@ -482,12 +482,20 @@ function storageRow(what, bytes, { note = '', deletable = false, id = '', name =
           </div>`;
 }
 
-// Enumerated, not summarised: "delete 23.4 GB" is a number, and what the user
-// is actually agreeing to is a list of named things.
-function openWipe() {
+// Kept outside runWipe() and reset only when the dialog opens: a 409 partway
+// through a run must not throw away the bytes already freed by the targets
+// that succeeded before it, and a retry must add to that total rather than
+// starting over. finish_uninstall's freed and the browser's own status line
+// both read from these, so an undercount here reaches the same places a
+// dropped delete would.
+let WIPE_FREED = 0, WIPE_RESISTED = [];
+
+// Builds the enumerated rows from whatever INVENTORY says right now, so a
+// list refreshed after a failed attempt reflects what is actually still on
+// disk rather than repeating rows for models the earlier targets in the same
+// run already deleted.
+function renderWipeList() {
   const inv = INVENTORY;
-  if (!inv) return;
-  const out = inv.outputs;
   const rows = [];
   for (const m of inv.models) rows.push([m.name, m.bytes]);
   if (inv.xet) rows.push(['The dedup cache', inv.xet]);
@@ -495,13 +503,24 @@ function openWipe() {
   // is the user's own .venv and never appears here at all.
   if (HAS_SHELL && inv.runtime) rows.push(['The Python engine', inv.runtime]);
   if (HAS_SHELL && inv.rest) rows.push(['Logs and settings', inv.rest]);
-
-  $('wipeTitle').textContent =
-    HAS_SHELL ? 'Delete everything and uninstall' : 'Delete weights and images';
   $('wipeList').innerHTML = rows.map(([what, bytes]) =>
     `<div class="row-model"><span>${what}</span>
        <span class="size">${human(bytes)}</span></div>`).join('')
     || '<p class="note">Nothing is downloaded.</p>';
+}
+
+// Enumerated, not summarised: "delete 23.4 GB" is a number, and what the user
+// is actually agreeing to is a list of named things.
+function openWipe() {
+  const inv = INVENTORY;
+  if (!inv) return;
+  const out = inv.outputs;
+  WIPE_FREED = 0;
+  WIPE_RESISTED = [];
+
+  $('wipeTitle').textContent =
+    HAS_SHELL ? 'Delete everything and uninstall' : 'Delete weights and images';
+  renderWipeList();
   $('wipeImagesLabel').textContent =
     `Also delete my ${out.count} image${out.count === 1 ? '' : 's'} (${human(out.bytes)})`;
   $('wipeImages').checked = false;
@@ -528,13 +547,14 @@ async function runWipe() {
   if (INVENTORY.xet) targets.push('/api/storage/xet');
   if (alsoImages) targets.push('/api/storage/outputs');
 
-  let freed = 0;
-  const resisted = [];
   for (const path of targets) {
     try {
       const result = await storageDelete(path);
-      freed += result.freed;
-      resisted.push(...result.resisted);
+      // Added to the running total immediately, not collected locally and
+      // merged at the end: a later target's 409 must not erase what this one
+      // already freed.
+      WIPE_FREED += result.freed;
+      WIPE_RESISTED.push(...result.resisted);
     } catch (e) {
       // A 409 means something started generating between the confirmation and
       // this click. Stop here rather than half-uninstalling behind a live render.
@@ -543,6 +563,10 @@ async function runWipe() {
       $('wipeGo').disabled = false;
       $('wipeGo').textContent = 'Try again';
       await loadStorage();
+      // The targets this call already deleted are gone from the fresh
+      // INVENTORY; re-enumerate so "Try again" is not shown against rows for
+      // things that no longer exist.
+      renderWipeList();
       return;
     }
   }
@@ -551,15 +575,15 @@ async function runWipe() {
     // The shell shuts the server down and deletes the data directory, then
     // navigates this window away. The promise is not awaited: the page it would
     // resolve into no longer exists.
-    window.__TAURI__.core.invoke('finish_uninstall', { freed }).catch(() => {});
+    window.__TAURI__.core.invoke('finish_uninstall', { freed: WIPE_FREED }).catch(() => {});
     $('wipeGo').textContent = 'Uninstalling…';
     return;
   }
 
   closeWipe();
-  setStatus(resisted.length
-    ? `freed ${human(freed)}; ${resisted.length} file(s) would not delete`
-    : `freed ${human(freed)}`);
+  setStatus(WIPE_RESISTED.length
+    ? `freed ${human(WIPE_FREED)}; ${WIPE_RESISTED.length} file(s) would not delete`
+    : `freed ${human(WIPE_FREED)}`);
   await loadStorage();
   await refresh().catch(() => {});
   loadGallery();
