@@ -572,6 +572,42 @@ def test_the_removed_card_offers_its_buttons():
     check("a button quits", "quit_app" in html)
 
 
+# ------------------------------------------------------ the uninstall flow ---
+
+def test_the_confirmation_enumerates_rather_than_summarises():
+    html = page()
+    check("there is a confirmation overlay", 'id="wipeOverlay"' in html)
+    check("it lists the models by name", "wipeList" in html)
+    check("the images are a separate, unchecked box", 'id="wipeImages"' in html)
+    check("the box is not checked by default",
+          'id="wipeImages"' in html and 'id="wipeImages" checked' not in html)
+    check("it says why the asymmetry exists",
+          "downloaded again" in html)
+
+
+def test_the_uninstall_half_is_behind_the_shell_test():
+    html = page()
+    check("the shell is feature-detected, never assumed", "HAS_SHELL" in html)
+    check("the shell command is named", "finish_uninstall" in html)
+    # The engine belongs to whoever installed it. In the repo flow that is the
+    # user's own .venv, and deleting it is not this page's business.
+    check("finish_uninstall is guarded by the detection",
+          "if (HAS_SHELL)" in html or "HAS_SHELL &&" in html)
+
+
+def test_the_flow_deletes_before_it_calls_the_shell():
+    html = page()
+    check("it deletes the weights first", "/api/storage/models/" in html)
+    check("then the dedup cache", "/api/storage/xet" in html)
+    check("the images only when asked", "wipeImages" in html)
+    check("and passes the total it actually freed", "freed" in html)
+
+
+def test_the_flow_reports_what_resisted():
+    html = page()
+    check("failures are collected, not swallowed", "resisted" in html)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]

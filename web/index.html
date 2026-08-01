@@ -396,6 +396,24 @@
   </div>
 </div>
 
+<div class="overlay" id="wipeOverlay" hidden>
+  <div class="card">
+    <h2 id="wipeTitle">Delete everything and uninstall</h2>
+    <p id="wipeIntro">This deletes, permanently:</p>
+    <div class="group" id="wipeList"></div>
+    <label style="text-transform:none;letter-spacing:0;color:var(--text);margin:18px 0 6px">
+      <input type="checkbox" id="wipeImages"> <span id="wipeImagesLabel"></span>
+    </label>
+    <p>Everything above this line can be downloaded again. A render and its seed
+       cannot.</p>
+    <p class="err" id="wipeError" hidden></p>
+    <div class="row">
+      <button class="primary" id="wipeGo">Delete everything</button>
+      <button class="link" id="wipeCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 let MODELS = {}, busy = false, current = null;
@@ -464,8 +482,88 @@ function storageRow(what, bytes, { note = '', deletable = false, id = '', name =
           </div>`;
 }
 
-// Replaced in the next task by the confirmation that enumerates.
-function openWipe() {}
+// Enumerated, not summarised: "delete 23.4 GB" is a number, and what the user
+// is actually agreeing to is a list of named things.
+function openWipe() {
+  const inv = INVENTORY;
+  if (!inv) return;
+  const out = inv.outputs;
+  const rows = [];
+  for (const m of inv.models) rows.push([m.name, m.bytes]);
+  if (inv.xet) rows.push(['The dedup cache', inv.xet]);
+  // The engine is the shell's to remove, and only the shell's. In a browser it
+  // is the user's own .venv and never appears here at all.
+  if (HAS_SHELL && inv.runtime) rows.push(['The Python engine', inv.runtime]);
+  if (HAS_SHELL && inv.rest) rows.push(['Logs and settings', inv.rest]);
+
+  $('wipeTitle').textContent =
+    HAS_SHELL ? 'Delete everything and uninstall' : 'Delete weights and images';
+  $('wipeList').innerHTML = rows.map(([what, bytes]) =>
+    `<div class="row-model"><span>${what}</span>
+       <span class="size">${human(bytes)}</span></div>`).join('')
+    || '<p class="note">Nothing is downloaded.</p>';
+  $('wipeImagesLabel').textContent =
+    `Also delete my ${out.count} image${out.count === 1 ? '' : 's'} (${human(out.bytes)})`;
+  $('wipeImages').checked = false;
+  $('wipeImages').disabled = !out.count;
+  $('wipeGo').disabled = false;
+  $('wipeGo').textContent = HAS_SHELL ? 'Delete everything and uninstall'
+                                      : 'Delete everything';
+  $('wipeError').hidden = true;
+  $('wipeOverlay').hidden = false;
+}
+
+function closeWipe() { $('wipeOverlay').hidden = true; }
+
+// The order is not arbitrary. Python deletes everything it can while it is
+// still alive; only then does the shell stop it and remove the runtime Python
+// was running from — which is the step Windows would not let Python take.
+async function runWipe() {
+  const alsoImages = $('wipeImages').checked;
+  $('wipeGo').disabled = true;
+  $('wipeGo').textContent = 'Deleting…';
+  $('wipeError').hidden = true;
+
+  const targets = INVENTORY.models.map(m => `/api/storage/models/${encodeURIComponent(m.key)}`);
+  if (INVENTORY.xet) targets.push('/api/storage/xet');
+  if (alsoImages) targets.push('/api/storage/outputs');
+
+  let freed = 0;
+  const resisted = [];
+  for (const path of targets) {
+    try {
+      const result = await storageDelete(path);
+      freed += result.freed;
+      resisted.push(...result.resisted);
+    } catch (e) {
+      // A 409 means something started generating between the confirmation and
+      // this click. Stop here rather than half-uninstalling behind a live render.
+      $('wipeError').textContent = String(e.message || e);
+      $('wipeError').hidden = false;
+      $('wipeGo').disabled = false;
+      $('wipeGo').textContent = 'Try again';
+      await loadStorage();
+      return;
+    }
+  }
+
+  if (HAS_SHELL) {
+    // The shell shuts the server down and deletes the data directory, then
+    // navigates this window away. The promise is not awaited: the page it would
+    // resolve into no longer exists.
+    window.__TAURI__.core.invoke('finish_uninstall', { freed }).catch(() => {});
+    $('wipeGo').textContent = 'Uninstalling…';
+    return;
+  }
+
+  closeWipe();
+  setStatus(resisted.length
+    ? `freed ${human(freed)}; ${resisted.length} file(s) would not delete`
+    : `freed ${human(freed)}`);
+  await loadStorage();
+  await refresh().catch(() => {});
+  loadGallery();
+}
 
 function renderStorage() {
   const inv = INVENTORY;
@@ -967,6 +1065,8 @@ $('prompt').addEventListener('keydown', e => {
 // Fetched when the section is opened, not on boot: it walks the model cache,
 // and the page has no reason to do that before someone asks.
 $('storage').addEventListener('toggle', () => { if ($('storage').open) loadStorage(); });
+$('wipeCancel').onclick = closeWipe;
+$('wipeGo').onclick = runWipe;
 boot();
 </script>
 </body>
