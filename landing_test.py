@@ -153,6 +153,71 @@ def test_both_languages_state_the_same_numbers() -> None:
         print(f"    only in Spanish: {sorted(set(es) - set(en))}")
 
 
+def _linearize(channel: float) -> float:
+    """One sRGB channel, 0..1, to linear light. The WCAG 2.x formula."""
+    if channel <= 0.03928:
+        return channel / 12.92
+    return ((channel + 0.055) / 1.055) ** 2.4
+
+
+def luminance(hex_colour: str) -> float:
+    """Relative luminance of a #rrggbb string."""
+    raw = hex_colour.lstrip("#")
+    r, g, b = (int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return (0.2126 * _linearize(r)
+            + 0.7152 * _linearize(g)
+            + 0.0722 * _linearize(b))
+
+
+def contrast(a: str, b: str) -> float:
+    """The WCAG contrast ratio between two #rrggbb colours."""
+    la, lb = luminance(a), luminance(b)
+    lighter, darker = max(la, lb), min(la, lb)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def theme_blocks(css: str) -> dict[str, dict[str, str]]:
+    """The two explicit theme blocks, as {theme: {var: hex}}.
+
+    Only the [data-theme] blocks are read. They are the ones that declare a
+    complete palette, and unlike :root and the media query they are named, so
+    a failure says which theme is wrong.
+    """
+    blocks: dict[str, dict[str, str]] = {}
+    for theme in ("light", "dark"):
+        match = re.search(
+            r':root\[data-theme="' + theme + r'"\]\s*\{(.*?)\}', css, re.S)
+        if not match:
+            continue
+        blocks[theme] = dict(
+            re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", match.group(1)))
+    return blocks
+
+
+# Every colour that ends up as text on the page background. 4.5:1 is WCAG AA
+# for body-sized text, which is what --muted and --accent are used at.
+ON_INK = ("text", "muted", "accent", "accent-2")
+
+
+def test_the_palette_meets_contrast() -> None:
+    blocks = theme_blocks(read("style.css"))
+    check("style.css declares both [data-theme] palettes",
+          set(blocks) == {"light", "dark"})
+    for theme, variables in sorted(blocks.items()):
+        ink = variables.get("ink")
+        check(f"the {theme} palette declares --ink", ink is not None)
+        if ink is None:
+            continue
+        for name in ON_INK:
+            colour = variables.get(name)
+            check(f"the {theme} palette declares --{name}", colour is not None)
+            if colour is None:
+                continue
+            ratio = contrast(colour, ink)
+            check(f"{theme} --{name} {colour} on --ink {ink} "
+                  f"reaches 4.5:1 (it is {ratio:.2f}:1)", ratio >= 4.5)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
