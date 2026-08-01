@@ -125,6 +125,18 @@ mod tests {
     fn free_disk_answers_for_a_real_directory() {
         let dir = tempfile::tempdir().unwrap();
         assert!(free_disk_bytes(dir.path()).unwrap() > 0);
+    }
+
+    // Unix only, and the asymmetry is the platform's, not a gap in the test.
+    // A path that does not exist has no volume to report on here, so the
+    // answer is None. On Windows the same string is read relative to the
+    // current drive, resolves to that drive's root, and reports its free
+    // space — which is the answer the bootstrap actually wants, since it asks
+    // about a directory it is *about* to create. Asserting None there would
+    // demand behaviour that would be wrong.
+    #[cfg(unix)]
+    #[test]
+    fn free_disk_has_no_answer_for_a_path_with_no_volume() {
         assert!(free_disk_bytes(std::path::Path::new("/zz-nope")).is_none());
     }
 

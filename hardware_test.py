@@ -306,19 +306,30 @@ def test_detect_survives_broken_system_calls():
     def boom(*_args, **_kwargs):
         raise OSError("no such binary")
 
-
+    # Two probes are broken, not one, and the second is the reason this test
+    # passes off macOS. `detect()` only shells out on Darwin — `_chip` falls
+    # through to platform.processor() on Linux and `_total_ram_gib` reads
+    # ctypes on Windows — so breaking subprocess.run alone leaves every probe
+    # on a CI runner succeeding, and `partial` correctly reports False. Disk
+    # space is measured on every platform, so breaking it too makes the claim
+    # this test is really about — a failed probe flags the profile — hold
+    # everywhere rather than only on the developer's laptop.
     real_run = hardware.subprocess.run
+    real_disk_usage = hardware.shutil.disk_usage
     try:
         hardware.subprocess.run = boom
+        hardware.shutil.disk_usage = boom
         prof = hardware.detect("cpu")
     finally:
         hardware.subprocess.run = real_run
+        hardware.shutil.disk_usage = real_disk_usage
 
     check("detection did not propagate the failure", isinstance(prof, hardware.HardwareProfile))
     check("the profile is flagged partial", prof.partial is True)
     check("budget_gb is still positive", prof.budget_gb > 0)
     check("tier is still known", prof.tier in ("cpu", "low", "mid", "high", "ultra"))
     check("subprocess.run was restored", hardware.subprocess.run is real_run)
+    check("disk_usage was restored", hardware.shutil.disk_usage is real_disk_usage)
 
 
 def test_detect_falls_back_when_something_unexpected_raises():
