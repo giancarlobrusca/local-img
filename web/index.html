@@ -573,9 +573,21 @@ async function runWipe() {
 
   if (HAS_SHELL) {
     // The shell shuts the server down and deletes the data directory, then
-    // navigates this window away. The promise is not awaited: the page it would
-    // resolve into no longer exists.
-    window.__TAURI__.core.invoke('finish_uninstall', { freed: WIPE_FREED }).catch(() => {});
+    // navigates this window away — so a *fulfilled* promise never arrives: the
+    // page it would resolve into no longer exists, which is why the success
+    // case is not awaited. A *rejected* one is a different animal. Rejection
+    // means the invoke never got as far as navigating away — an ACL
+    // non-resolution, a serde mismatch, a panic in the command — so nothing
+    // was torn down and this page is very much still here to say so. Silently
+    // discarding that would freeze the user on "Uninstalling…" forever, with
+    // the models already gone and the runtime still sitting on disk.
+    window.__TAURI__.core.invoke('finish_uninstall', { freed: WIPE_FREED, resisted: WIPE_RESISTED })
+      .catch(e => {
+        $('wipeError').textContent = String(e && e.message || e);
+        $('wipeError').hidden = false;
+        $('wipeGo').disabled = false;
+        $('wipeGo').textContent = 'Try again';
+      });
     $('wipeGo').textContent = 'Uninstalling…';
     return;
   }

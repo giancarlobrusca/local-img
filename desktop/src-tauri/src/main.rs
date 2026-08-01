@@ -330,9 +330,9 @@ fn last_step() -> (String, String) {
 /// The shell half of an uninstall the user has already confirmed.
 ///
 /// Python has deleted the weights, the chunk cache, and — if the box was ticked
-/// — the renders, and passes what it freed. It cannot take the last step: it is
-/// running from inside `data_dir/runtime`, and Windows does not let a process
-/// unlink a file it holds open.
+/// — the renders, and passes what it freed and what it could not delete. It
+/// cannot take the last step: it is running from inside `data_dir/runtime`, and
+/// Windows does not let a process unlink a file it holds open.
 ///
 /// Every intermediate state here is a valid state, which is why none of this
 /// needs a transaction. Interrupted after Python's half: weights gone, runtime
@@ -340,7 +340,7 @@ fn last_step() -> (String, String) {
 /// the data directory half-deleted: the stamp is gone, so the next launch
 /// rebuilds from scratch — precisely what `reinstall_engine` already does.
 #[tauri::command]
-fn finish_uninstall(app: AppHandle, window: WebviewWindow, freed: u64) {
+fn finish_uninstall(app: AppHandle, window: WebviewWindow, freed: u64, resisted: Vec<String>) {
     {
         let shell = app.state::<Shell>();
         // `closing` stops the close handler asking about a render on a server
@@ -380,7 +380,13 @@ fn finish_uninstall(app: AppHandle, window: WebviewWindow, freed: u64) {
         // Measured either side rather than trusted: the total on screen has to
         // be what came off the disk, including when part of it would not go.
         let before = progress::dir_size(&shell.layout.data_dir);
-        let resisted = uninstall::remove_data_dir(&shell.layout.data_dir);
+        let mut resisted = resisted;
+        // Python's entries come first: they happened first, deleting the
+        // weights and dedup cache before this thread ever touches the data
+        // directory. Dropping them here would make the antivirus-locked-file
+        // case indistinguishable from a clean run on the one screen that is
+        // supposed to say otherwise.
+        resisted.extend(uninstall::remove_data_dir(&shell.layout.data_dir));
         let after = progress::dir_size(&shell.layout.data_dir);
 
         let (last_step, open_label) = last_step();

@@ -620,12 +620,30 @@ def test_a_409_mid_flow_keeps_what_was_already_freed():
           "WIPE_FREED +=" in html)
     check("the shell receives the accumulated total, not a call-local one",
           "freed: WIPE_FREED" in html)
+    check("and the accumulated resisted list, not just the shell's own",
+          "resisted: WIPE_RESISTED" in html)
 
 
 def test_a_409_mid_flow_refreshes_the_enumerated_list():
     html = page()
     check("the list is rebuilt from the fresh inventory after a failed attempt",
           "renderWipeList" in html)
+
+
+def test_finish_uninstall_rejection_is_not_swallowed():
+    html = page()
+    # A rejection here means the shell never navigated away and never tore
+    # anything down, so the page is still on screen to receive it — unlike the
+    # fulfilled case, which is deliberately left unawaited because the page it
+    # would resolve into is gone. An empty `.catch(() => {})` on this call
+    # would freeze the user on "Uninstalling..." with the models already
+    # deleted and no way to know anything went wrong.
+    call = html.split("invoke('finish_uninstall'")[1].split("'Uninstalling")[0]
+    check("the rejection handler is not empty",
+          ".catch(() => {})" not in call)
+    check("it reports the error text on screen",
+          "wipeError" in call)
+    check("it lets the user try again", "wipeGo" in call)
 
 
 if __name__ == "__main__":
