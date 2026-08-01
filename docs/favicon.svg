@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    .raw   { fill: #b8761f }
+    .burnt { fill: #8f451f }
+    @media (prefers-color-scheme: dark) {
+      .raw   { fill: #dfa349 }
+      .burnt { fill: #a6522b }
+    }
+  </style>
+  <clipPath id="chip"><rect x="2" y="2" width="28" height="28" rx="8.5"/></clipPath>
+  <g clip-path="url(#chip)">
+    <rect class="raw" x="2" y="2" width="28" height="28"/>
+    <path class="burnt" d="M2 30 L30 2 L30 30 Z"/>
+  </g>
+</svg>

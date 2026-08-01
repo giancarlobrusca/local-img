@@ -1,13 +1,15 @@
   :root {
-    --ink:      #0a0b0e;
-    --panel:    #14161b;
-    --panel-2:  #1a1d23;
-    --line:     #262a33;
-    --text:     #e9ebef;
-    --muted:    #8b929c;
-    --accent:   #7c8cff;
-    --accent-2: #b9c2ff;
-    --accent-bg:#1a1e3a;
+    --ink:      #0c0b09;
+    --panel:    #17150f;
+    --panel-2:  #1e1b14;
+    --line:     #2b271f;
+    --text:     #ece7df;
+    --muted:    #968d80;
+    --accent:   #dfa349;
+    --accent-2: #f0c888;
+    --accent-bg:#2a2013;
+    --brand-raw:   #dfa349;
+    --brand-burnt: #a6522b;
     --shadow:   0 1px 0 rgba(255,255,255,.03) inset, 0 12px 32px rgba(0,0,0,.5);
 
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
@@ -19,28 +21,32 @@
 
   @media (prefers-color-scheme: light) {
     :root {
-      --ink:      #f4f6f9;
+      --ink:      #f6f3ed;
       --panel:    #ffffff;
-      --panel-2:  #eef1f6;
-      --line:     #dde2ea;
-      --text:     #14161b;
-      --muted:    #5d6572;
-      --accent:   #5361e8;
-      --accent-2: #3b48c4;
-      --accent-bg:#e9ebfd;
+      --panel-2:  #efeae0;
+      --line:     #e2dbcd;
+      --text:     #1a1712;
+      --muted:    #6b6357;
+      --accent:   #8f5310;
+      --accent-2: #6d3d0b;
+      --accent-bg:#fbf1de;
+      --brand-raw:   #b8761f;
+      --brand-burnt: #8f451f;
       --shadow:   0 1px 2px rgba(20,22,27,.04), 0 10px 28px rgba(20,22,27,.07);
     }
   }
   :root[data-theme="light"] {
-    --ink: #f4f6f9; --panel: #ffffff; --panel-2: #eef1f6; --line: #dde2ea;
-    --text: #14161b; --muted: #5d6572; --accent: #5361e8; --accent-2: #3b48c4;
-    --accent-bg: #e9ebfd;
+    --ink: #f6f3ed; --panel: #ffffff; --panel-2: #efeae0; --line: #e2dbcd;
+    --text: #1a1712; --muted: #6b6357; --accent: #8f5310; --accent-2: #6d3d0b;
+    --accent-bg: #fbf1de;
+    --brand-raw: #b8761f; --brand-burnt: #8f451f;
     --shadow: 0 1px 2px rgba(20,22,27,.04), 0 10px 28px rgba(20,22,27,.07);
   }
   :root[data-theme="dark"] {
-    --ink: #0a0b0e; --panel: #14161b; --panel-2: #1a1d23; --line: #262a33;
-    --text: #e9ebef; --muted: #8b929c; --accent: #7c8cff; --accent-2: #b9c2ff;
-    --accent-bg: #1a1e3a;
+    --ink: #0c0b09; --panel: #17150f; --panel-2: #1e1b14; --line: #2b271f;
+    --text: #ece7df; --muted: #968d80; --accent: #dfa349; --accent-2: #f0c888;
+    --accent-bg: #2a2013;
+    --brand-raw: #dfa349; --brand-burnt: #a6522b;
     --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 12px 32px rgba(0,0,0,.5);
   }
 
@@ -97,6 +103,9 @@
     display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline;
   }
   .eyebrow b { color: var(--text); font-weight: 500; }
+  /* The mark sits on the eyebrow's baseline row, sized to the mono text
+     beside it rather than to the line box, so it never nudges the row. */
+  .eyebrow .mark { display: block; flex: none; align-self: center; }
   .langs { margin-left: auto; letter-spacing: .08em; }
   .lead { font-size: clamp(1.0625rem, 2vw, 1.1875rem); color: var(--muted); max-width: 56ch; }
   .lead strong { color: var(--text); font-weight: 560; }

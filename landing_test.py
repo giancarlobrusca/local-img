@@ -218,6 +218,33 @@ def test_the_palette_meets_contrast() -> None:
                   f"reaches 4.5:1 (it is {ratio:.2f}:1)", ratio >= 4.5)
 
 
+def test_the_mark_is_inline_and_theme_aware() -> None:
+    css = read("style.css")
+    for theme, variables in sorted(theme_blocks(css).items()):
+        for name in ("brand-raw", "brand-burnt"):
+            check(f"the {theme} palette declares --{name}",
+                  name in variables)
+
+    # theme_blocks only reads the two [data-theme] blocks. The mark also has
+    # to be coloured for the visitor who never touches the toggle, which means
+    # :root and the prefers-color-scheme query too — four declarations each.
+    # Without this, the mark renders with no fill on a first visit.
+    for name in ("brand-raw", "brand-burnt"):
+        check(f"--{name} is declared in all four theme blocks",
+              css.count(f"--{name}:") == 4)
+
+    for page in PAGES:
+        html = read(page)
+        # Inline, not <img src>: an external SVG cannot read the page's CSS
+        # custom properties, so it could not follow the light/dark theme.
+        check(f"{page} carries the mark inline",
+              'viewBox="0 0 32 32"' in html)
+        check(f"{page}'s mark takes its colour from the theme",
+              "var(--brand-raw)" in html and "var(--brand-burnt)" in html)
+        check(f"{page} links the favicon",
+              'rel="icon"' in html and "favicon.svg" in html)
+
+
 if __name__ == "__main__":
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
