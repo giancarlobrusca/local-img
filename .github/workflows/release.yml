@@ -48,6 +48,27 @@ jobs:
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Without this, Tauri never runs codesign at all, and the only
+          # signature the .app carries is the ad-hoc one the arm64 linker
+          # leaves on the main binary by itself. That signature declares
+          # sealed resources, but no Contents/_CodeSignature/ exists to back
+          # it, so the bundle is *invalid* rather than merely untrusted --
+          # `codesign --verify` says "code has no resources but signature
+          # indicates they must be present". Gatekeeper answers an invalid
+          # signature with "is damaged and can't be opened. You should move
+          # it to the Trash", which has no override anywhere in the UI, so
+          # the download was unusable rather than one click away.
+          #
+          # "-" is codesign's ad-hoc identity. It needs no certificate and no
+          # Apple account, seals the bundle for real, and puts the app back
+          # in the "could not verify it is free of malware" category, which
+          # the user can get past from System Settings. Read only by the
+          # macOS bundler, so it is inert on the Windows and Linux legs.
+          #
+          # Notarization is deliberately not attempted: with no APPLE_ID or
+          # APPLE_API_KEY set, tauri-bundler reports MissingCredentials and
+          # logs a warning rather than failing the build.
+          APPLE_SIGNING_IDENTITY: '-'
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
@@ -55,12 +76,45 @@ jobs:
           releaseBody: |
             Download the file for your platform below.
 
-            **These builds are not signed.** macOS will say the app "cannot be
-            opened because the developer cannot be verified" — right-click the
-            app, choose Open, then Open again. Windows SmartScreen will say
-            "Windows protected your PC" — click More info, then Run anyway.
+            **These builds are signed ad-hoc, not notarized.** macOS will say
+            "Apple could not verify 'local-img' is free of malware" — click
+            Done, then open System Settings → Privacy & Security, scroll to
+            the message about local-img, and click Open Anyway. (Control-click
+            → Open no longer works: macOS 15 removed that shortcut.) Windows
+            SmartScreen will say "Windows protected your PC" — click More
+            info, then Run anyway.
           releaseDraft: true
           args: ${{ matrix.args }}
+
+      # v0.2.1 shipped a .dmg macOS called damaged, because nothing here ever
+      # asked whether the bundle was signed -- the build was green and the
+      # download was dead. A missing APPLE_SIGNING_IDENTITY fails exactly this
+      # way again: quietly, and only on the user's machine. So assert it on
+      # the runner instead. `codesign --verify` is what tells an invalid
+      # signature apart from an untrusted one, and the sealed-resources line
+      # is the specific thing a linker-signed binary cannot fake.
+      # Checked inside the .dmg rather than in bundle/macos/, for two reasons:
+      # the .dmg is what people actually download, and Tauri deletes the
+      # staged .app once the .dmg is built, so a check pointed at that path
+      # would fail on every release instead of only on broken ones.
+      # -mountpoint avoids /Volumes/local-img, which a second concurrent
+      # build -- or a developer with the release still mounted -- would
+      # already be holding.
+      - name: The macOS bundle has to be really signed
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          test ${#dmgs[@]} -eq 1 || { echo "expected exactly one .dmg, found ${#dmgs[@]}"; exit 1; }
+          mount=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "${dmgs[0]}"
+          trap 'hdiutil detach "$mount" >/dev/null || true' EXIT
+          codesign --verify --deep --strict --verbose=2 "$mount/local-img.app"
+          codesign -dv --verbose=2 "$mount/local-img.app" 2>&1 | tee /tmp/cs.txt
+          grep -q "Sealed Resources version=" /tmp/cs.txt \
+            || { echo "bundle has no sealed resources -- Gatekeeper will call this damaged"; exit 1; }
 
       # The landing page links to /releases/latest/download/<name>, which only
       # resolves if <name> is identical in every release. Tauri puts the

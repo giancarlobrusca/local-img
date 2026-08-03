@@ -37,12 +37,14 @@ rather than merely slow.
 
 ### The security prompt
 
-The builds are **not signed** — code signing certificates cost money per year,
-and this is a free tool. Both systems will warn you, once:
+The builds are signed ad-hoc but **not notarized** — a Developer ID certificate
+costs money per year, and this is a free tool. Both systems will warn you, once:
 
-- **macOS** — "local-img cannot be opened because the developer cannot be
-  verified." Right-click the app in Applications, choose **Open**, then
-  **Open** again in the dialog. macOS remembers the choice.
+- **macOS** — "Apple could not verify 'local-img' is free of malware that may
+  harm your Mac or compromise your privacy." Click **Done**, then open
+  **System Settings → Privacy & Security**, scroll to the line about local-img,
+  and click **Open Anyway**. macOS remembers the choice. Control-clicking the
+  app and choosing Open used to work instead; macOS 15 removed that shortcut.
 - **Windows** — "Windows protected your PC." Click **More info**, then
   **Run anyway**.
 

@@ -213,17 +213,19 @@
       <h2>Your computer will stop you once. This is how to get past it.</h2>
       <p class="lead">
         Both systems warn about apps from developers who haven't paid for a signing
-        certificate. It's a one-time click, and your machine remembers.
+        certificate. You tell it to go ahead once, and your machine remembers.
       </p>
     </div>
     <div class="prompts">
       <div class="prompt">
         <h3>macOS</h3>
-        <p class="quote">“local-img cannot be opened because the developer cannot be verified.”</p>
+        <p class="quote">“Apple could not verify ‘local-img’ is free of malware that may harm your Mac or compromise your privacy.”</p>
         <p>
-          Right-click the app in your Applications folder, choose <kbd>Open</kbd>, then
-          <kbd>Open</kbd> again in the box that appears. Double-clicking it normally
-          won't work the first time — you have to right-click.
+          Click <kbd>Done</kbd> — not Move to Trash. Then open
+          <kbd>System Settings</kbd> → <kbd>Privacy &amp; Security</kbd>, scroll down to
+          the line about local-img, and click <kbd>Open Anyway</kbd>. Control-clicking
+          the app and choosing Open used to work instead; macOS 15 removed that
+          shortcut, so System Settings is now the only way through.
         </p>
       </div>
       <div class="prompt">

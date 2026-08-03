@@ -37,13 +37,17 @@ sino impracticable.
 
 ### El aviso de seguridad
 
-Los builds **no están firmados** — los certificados de firma cuestan dinero por
-año y esto es una herramienta gratuita. Los dos sistemas avisan, una vez:
+Los builds están firmados ad-hoc pero **sin notarizar** — un certificado
+Developer ID cuesta dinero por año y esto es una herramienta gratuita. Los dos
+sistemas avisan, una vez:
 
-- **macOS** — "no se puede abrir local-img porque no se puede verificar al
-  desarrollador". Hacé clic derecho sobre la app en Aplicaciones, elegí **Open**
-  («Abrir», si tenés el sistema en español), y después **Open** otra vez en el
-  diálogo. macOS se acuerda de la decisión.
+- **macOS** — "Apple no pudo verificar que local-img esté libre de software
+  malicioso que podría dañar tu Mac o comprometer tu privacidad". Hacé clic en
+  **Done** («OK») y después abrí **System Settings → Privacy & Security**
+  («Configuración del Sistema → Privacidad y seguridad»), bajá hasta la línea
+  que menciona local-img y hacé clic en **Open Anyway** («Abrir igualmente»).
+  macOS se acuerda de la decisión. Antes alcanzaba con clic derecho → Abrir;
+  macOS 15 sacó ese atajo.
 - **Windows** — "Windows protegió su PC". Hacé clic en **More info** («Más
   información») y después en **Run anyway** («Ejecutar de todas formas»).
 
