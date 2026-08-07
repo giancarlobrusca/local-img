@@ -112,8 +112,11 @@ async def require_session(request, call_next):
     Three ways to present the token, and the differences matter:
 
       cookie  — how the browser carries it after the handoff. HttpOnly, so no
-                page can read it; SameSite=Strict, so none can make the browser
-                send it cross-site.
+                page can read it; SameSite=Lax, so no cross-site page can make
+                the browser send it on a subresource request or an unsafe
+                method — which is every route that changes anything here, all
+                of them POST or DELETE. Lax rather than Strict because Strict
+                breaks the handoff itself: see `index`.
       header  — how the shell's own Rust code authenticates. A cross-origin
                 page cannot set a custom header without a CORS preflight, which
                 this middleware answers with 403.
@@ -122,6 +125,13 @@ async def require_session(request, call_next):
                 cookie. Allowing it everywhere would make the whole API
                 bearer-authenticated over the leakiest channel there is:
                 Referer, browser history, shell history, and any future log.
+
+    Order matters, and only in one place: on `/` the query token is read before
+    the cookie. Cookies ignore the port, so a launch inherits 127.0.0.1's jar
+    from the launch before it while minting a token of its own — and a stale
+    value read first would fail the gate on the very route that exists to
+    replace it, wedging the shell's handoff with no way back. Everywhere else
+    there is no query token, so the cookie is still what answers.
     """
     if not TOKEN:
         return await call_next(request)
@@ -132,9 +142,9 @@ async def require_session(request, call_next):
     ):
         return PlainTextResponse("forbidden origin", status_code=403)
     supplied = (
-        request.cookies.get(COOKIE_NAME)
+        (request.query_params.get("token") if request.url.path == "/" else None)
+        or request.cookies.get(COOKIE_NAME)
         or request.headers.get(TOKEN_HEADER)
-        or (request.query_params.get("token") if request.url.path == "/" else None)
     )
     if supplied != TOKEN:
         return PlainTextResponse("missing session", status_code=403)
@@ -641,11 +651,19 @@ def index(token: str | None = None, firstrun: int = 0):
     The token reaches the server exactly once, in a URL the shell navigates to
     itself; from then on the browser carries a cookie no other page can read.
     An invalid token never gets here: the middleware rejected it already.
+
+    The redirect is what keeps the token out of the document URL, so no script
+    on the page can read `location.search` and undo HttpOnly — which is also
+    why the cookie cannot be SameSite=Strict. The shell navigates the window
+    away from its own `tauri://localhost` page, so this whole exchange is one
+    cross-site top-level navigation, redirect included; WebKit withholds a
+    Strict cookie from every leg of it, and `/` then arrives with nothing to
+    authenticate. Lax is sent on precisely this request and no other kind.
     """
     if TOKEN and token is not None:
         response = RedirectResponse("/?firstrun=1" if firstrun else "/", status_code=303)
         response.set_cookie(
-            COOKIE_NAME, TOKEN, httponly=True, samesite="strict", path="/"
+            COOKIE_NAME, TOKEN, httponly=True, samesite="lax", path="/"
         )
         return response
     # encoding="utf-8" is not optional. Without it Python decodes with the

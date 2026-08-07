@@ -154,13 +154,56 @@ def test_the_token_route_sets_the_cookie_and_redirects():
         check("the redirect keeps firstrun", res.headers["location"] == "/?firstrun=1")
         cookie = res.headers["set-cookie"].lower()
         check("the cookie is HttpOnly", "httponly" in cookie)
-        check("the cookie is SameSite=Strict", "samesite=strict" in cookie)
+        # Lax, not Strict, and the difference is the whole handoff. The shell
+        # navigates the window from its own `tauri://localhost` page to
+        # 127.0.0.1, which is a cross-site top-level navigation — and the 303
+        # below is still part of it. WebKit withholds a Strict cookie from
+        # every leg of such a navigation, so `/` arrives with no cookie, no
+        # header and no query token, and the gate answers "missing session"
+        # with no way out: each retry repeats the same handoff. Lax is defined
+        # to ride exactly this request — a top-level GET — and nothing else.
+        check("the cookie is SameSite=Lax", "samesite=lax" in cookie)
         check("the cookie carries the token", TOKEN in res.headers["set-cookie"])
 
         # httpx keeps the cookie in its jar, so the next call is a real
         # second request from the same browser.
+        check("the redirect target answers once the cookie is set",
+              gated.get("/").status_code == 200)
         check("the gallery answers once the cookie is set",
               gated.get("/api/gallery").status_code == 200)
+    finally:
+        restore()
+
+
+def test_a_stale_cookie_does_not_shadow_a_fresh_handoff():
+    """A cookie from an earlier launch must not be able to wedge the app.
+
+    Cookies ignore the port, so every launch shares 127.0.0.1's jar with the
+    one before it — while each launch mints a token of its own. Were the
+    cookie consulted first, a leftover value would fail the gate on `/`, which
+    is the one route that can replace it, and the shell's handoff would have
+    no way back: every relaunch would answer "missing session" forever. So on
+    `/` the query token wins, and everywhere else there is no query token to
+    win with.
+    """
+    gated, restore = gated_client()
+    # Sent as a header rather than seeded into httpx's jar: a jar entry with no
+    # matching domain is silently dropped, and every check here would then pass
+    # against a request that carried no stale cookie at all.
+    stale = {"Cookie": f"{app_module.COOKIE_NAME}=token-from-an-earlier-launch"}
+    try:
+        check("a stale cookie authenticates nothing",
+              gated.get("/api/gallery", headers=stale).status_code == 403)
+        res = gated.get(f"/?token={TOKEN}", headers=stale, follow_redirects=False)
+        check("the handoff redirects past a stale cookie", res.status_code == 303)
+        check("the stale cookie is replaced",
+              TOKEN in res.headers.get("set-cookie", ""))
+        check("the page answers on the cookie that replaced it",
+              gated.get("/").status_code == 200)
+        # The precedence must not become a way in: a wrong token on / is still
+        # a wrong token, cookie in the jar or not.
+        check("a wrong query token is rejected even with a good cookie",
+              gated.get("/?token=wrong").status_code == 403)
     finally:
         restore()
 
@@ -274,6 +317,7 @@ if __name__ == "__main__":
             test_a_gated_server_refuses_a_cookieless_caller,
             test_health_answers_before_the_cookie_exists,
             test_the_token_route_sets_the_cookie_and_redirects,
+            test_a_stale_cookie_does_not_shadow_a_fresh_handoff,
             test_a_foreign_origin_is_rejected_even_with_the_cookie,
             test_origin_allowed_is_a_predicate,
             test_query_token_is_scoped_to_the_handoff_route,
